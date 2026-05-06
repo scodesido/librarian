@@ -1,0 +1,65 @@
+[project]
+name = "librarian-backend"
+version = "0.1.0"
+description = "Librarian"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "asyncpg>=0.31.0",
+    "cryptography>=48.0.0",
+    "fastapi>=0.136.1",
+    "google-api-python-client>=2.195.0",
+    "google-auth>=2.50.0",
+    "google-auth-oauthlib>=1.3.1",
+    "pydantic>=2.13.3",
+    "pydantic-settings>=2.14.0",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.46.0",
+]
+
+[dependency-groups]
+analysis = [
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
+    "scikit-learn>=1.8.0",
+]
+dev = [
+    "asyncpg-stubs>=0.31.1",
+    "mypy>=1.19.1",
+    "ruff>=0.14.14",
+    "types-pyjwt>=1.7.1",
+    "types-pyyaml>=6.0.12.20250915",
+]
+
+# Scripts
+[project.scripts]
+launch-api = "librarian.api.main:entrypoint"
+migrate = "librarian.migrate.main:entrypoint"
+
+
+# Build and format
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/librarian"]
+
+[tool.ruff.format]
+docstring-code-format = true
+[tool.ruff.lint]
+extend-select = [
+    "I", # isort
+    "B", # bugbear
+    "N", # pep-8 naming
+]
+ignore = [
+    "N818", # I like to call my Exceptions Exception
+]
+
+[tool.mypy]
+mypy_path = "src"
+plugins = ['pydantic.mypy']
+explicit_package_bases = true
+check_untyped_defs = true
+cache_fine_grained = true

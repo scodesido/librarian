@@ -1,0 +1,24 @@
+services:
+  librarian-api:
+    hostname: librarian-api
+    container_name: librarian-api
+    image: librarian-api:latest
+    build:
+      context: ./backend
+    ports:
+      - 127.0.0.1:8000:8000
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/db:/app/db
+      - ./dev-config/api/settings.yaml:/app/config/settings.yaml:ro
+
+  librarian-postgres:
+    hostname: librarian-postgres
+    container_name: librarian-postgres
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_DB=librarian
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin-pass
+    volumes:
+      - ./.container_data/postgres:/var/lib/postgresql/17/docker

@@ -1,0 +1,85 @@
+ARG APP_DIR='/app'
+
+# Build stage
+FROM python:3.13-slim-trixie AS build
+
+# App directory
+ARG APP_DIR
+WORKDIR $APP_DIR
+
+# UV env vars
+ENV \
+    UV_VERSION='0.9.26' \
+    UV_INSTALL_DIR='/usr/local/bin' \
+    UV_SYSTEM='true'
+
+# Use bash as the shell for running commands
+SHELL ["/bin/bash", "-c"]
+
+# Install core system utils
+RUN apt update
+RUN apt -y upgrade
+RUN apt -y install curl
+
+# Install system dependencies
+RUN apt -y install \
+    build-essential \
+    libpq-dev
+
+# Install uv (Python package/dependency manager)
+RUN set -o pipefail \
+    && curl -LsSf \
+        "https://astral.sh/uv/$UV_VERSION/install.sh" \
+    | sh
+
+# Install python dependencies
+COPY pyproject.toml .
+COPY uv.lock .
+COPY README.md .
+RUN uv sync --locked --no-install-project
+
+# Copy full app source and install it
+COPY src/ src/
+COPY db/ db/
+RUN uv sync --locked
+
+# Fail the build if linter is not happy
+RUN uv run ruff format --check
+RUN uv run ruff check
+RUN uv run mypy src/
+
+RUN uv sync --locked --no-dev
+
+# Dbmate
+FROM ghcr.io/amacneil/dbmate:2.33.0 AS dbmate
+
+# Final stage
+FROM python:3.13-slim-trixie AS dist
+
+# App directory
+ARG APP_DIR
+WORKDIR $APP_DIR
+
+# Update system
+RUN apt update
+RUN apt -y upgrade
+RUN apt -y install \
+    postgresql-client
+
+# Copy venv from previous step
+COPY --from=build \
+    "$APP_DIR/.venv" \
+    "$APP_DIR/.venv"
+# Copy app code from previous step
+COPY --from=build \
+    "$APP_DIR/src" \
+    "$APP_DIR/src"
+# Copy dbmate runnable
+COPY --from=dbmate \
+    /usr/local/bin/dbmate \
+    /usr/local/bin/dbmate
+
+# Add venv to path
+ENV PATH="$APP_DIR/.venv/bin:$PATH"
+
+ENTRYPOINT exec launch-api

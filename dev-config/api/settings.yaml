@@ -1,0 +1,11 @@
+api:
+  host: librarian-api
+  port: 8000
+  reload: true
+
+database:
+  user: admin
+  password: admin-pass
+  host: librarian-postgres
+  port: 5432
+  name: librarian
