@@ -1,4 +1,4 @@
-# Python style and conventions
+# Backend Python style and conventions
 Below is some guidance on how to write code for this repo. However, first and foremost, what the repo should be is defined by what the repo is.
 Do always take a look at existing code and conventions in relevant or similar files, and use that as your main guidance. In case of conflict or doubt, ask.
 
@@ -14,12 +14,22 @@ with possibly helper methods that very directly map to the class. E.g. derived p
 
 Do not use `_private_function` naming convention for functions.
 
+Use always `from ... import ...` imports, if needed use aliases `... as ...`. Avoid raw `import ...`. Avoid `__init__.py` initializers when possible.
+
 ## API
 The API endpoints should live in their own files under endpoints/. The folder structure should map to the API path structure.
 Each terminal python module under endpoints/ represents a router. Each router can have more than one endpoint, but ideally not many.
-The response and request models must live in the same file as the endpoints that use them. But to avoid cluttering, any reusable
-nested models used should be in src/librarian/types.
+The response and request models must live in the same file as the endpoints that use them. The same applies to other models
+for specific use cases - we try to follow a logic of code locality, "define where you use".
 
 # Database management
 We use dbmate. All migrations must be created by the user, not yourself - if you need a new one, ask the user to create a new,
 empty migration file (under backend/db/migrations/) and then fill it in as needed.
+
+# Frontend React style
+
+It is meant to be a simple frontend. The ideas about small files, descriptive names, and code locality still applies.
+In fact, locality goes as far as avoiding the use of CSS, and having style live in the corresponding components.
+Although this means - in the component definitions, not as ad-hoc changes in component usage.
+
+We use a `my-module.tsx` convention for tsx files. Inside, this would declare a `MyModule` component.

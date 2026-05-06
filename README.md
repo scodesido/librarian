@@ -1,1 +1,7 @@
 # Librarian
+
+## Docker env vars
+```
+LIBRARIAN__GOOGLE_OAUTH__CLIENT_ID=...
+LIBRARIAN__GOOGLE_OAUTH__CLIENT_SECRET=...
+```

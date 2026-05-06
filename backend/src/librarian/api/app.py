@@ -4,21 +4,31 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from librarian.api.db.connect import attach_db_connection_pool
+from librarian.api.core.db.connect import attach_db_connection_pool
+from librarian.api.core.http.client import attach_http_client
+from librarian.api.endpoints.gdrive.files import router as gdrive_files_router
 from librarian.api.endpoints.health import router as health_router
+from librarian.api.endpoints.home import router as home_router
+from librarian.api.endpoints.oauth.google import router as oauth_google_router
 from librarian.api.settings import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    async with attach_db_connection_pool(app):
+    async with (
+        attach_db_connection_pool(app),
+        attach_http_client(app),
+    ):
         yield
 
 
 def create() -> FastAPI:
-    app = FastAPI()
+    app = FastAPI(lifespan=lifespan)
 
     app.include_router(health_router)
+    app.include_router(oauth_google_router)
+    app.include_router(gdrive_files_router)
+    app.include_router(home_router)
 
     app.add_middleware(
         CORSMiddleware,

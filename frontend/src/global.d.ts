@@ -1,0 +1,5 @@
+declare global {
+  const API_URL: string;
+}
+
+export {};

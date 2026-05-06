@@ -11,6 +11,21 @@ services:
       - ./backend/src:/app/src
       - ./backend/db:/app/db
       - ./dev-config/api/settings.yaml:/app/config/settings.yaml:ro
+    env_file: .env
+
+  librarian-web:
+    hostname: librarian-web
+    container_name: librarian-web
+    image: librarian-web:dev
+    build:
+      context: ./frontend
+      target: dev
+    command: --host librarian-web
+    ports:
+      - 127.0.0.1:3000:3000
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
 
   librarian-postgres:
     hostname: librarian-postgres
@@ -21,4 +36,4 @@ services:
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=admin-pass
     volumes:
-      - ./.container_data/postgres:/var/lib/postgresql/17/docker
+      - ./.container_data/postgres:/var/lib/postgresql/data

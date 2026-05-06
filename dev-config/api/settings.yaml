@@ -9,3 +9,11 @@ database:
   host: librarian-postgres
   port: 5432
   name: librarian
+
+# google_oauth.client_id, .client_secret and .token_encryption_key are
+# expected via env (LIBRARIAN__GOOGLE_OAUTH__CLIENT_ID, _CLIENT_SECRET,
+# _TOKEN_ENCRYPTION_KEY) — typically loaded from a local .env file.
+google_oauth:
+  cookie_secure: false
+  post_login_redirect: /gdrive/files
+  token_encryption_key: 6DERvXJRIJQChZY06cGR1A0Aj8o0CS0zh40H7wtv-kU=

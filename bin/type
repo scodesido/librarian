@@ -1,7 +1,6 @@
 #!/bin/bash
 SCRIPT_DIR=$(dirname $(realpath "$0"))
 
-cd "$SCRIPT_DIR/../backend/"
-uv run ruff format src/
-uv run ruff check --fix src/
-uv run mypy src/
+cd "$SCRIPT_DIR/../"
+bin/be-type
+bin/fe-type

@@ -1,0 +1,9 @@
+#!/bin/bash
+SCRIPT_DIR=$(dirname $(realpath "$0"))
+
+cd "$SCRIPT_DIR/../frontend/"
+npm run prettier-fix
+npm run lint-fix
+npm run type-check
+
+
