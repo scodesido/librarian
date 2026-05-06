@@ -2,6 +2,8 @@
 Below is some guidance on how to write code for this repo. However, first and foremost, what the repo should be is defined by what the repo is.
 Do always take a look at existing code and conventions in relevant or similar files, and use that as your main guidance. In case of conflict or doubt, ask.
 
+As a general principle, you can edit source files in the repo. But for anything else - in particular, running commands - ask the user instead.
+
 ## Functions and files
 We keep files and functions small, idiomatic, and hierarchical. It should be clear to a user what something does (this small file does what the name says it does)
 and where to find it (meaningful folder hierarchy). The same applies to variable and function names. Consistency across the codebase matters enormously -

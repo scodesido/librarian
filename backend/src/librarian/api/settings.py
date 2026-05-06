@@ -31,7 +31,7 @@ class GoogleOAuthSettings(BaseModel):
     token_encryption_key: SecretStr | None = None
     session_ttl_days: int = 1
     cookie_secure: bool = False
-    post_login_redirect: str = "/gdrive/files"
+    post_login_redirect: str = "http://localhost:3000/"
 
     @property
     def get_client_id(self) -> str:
