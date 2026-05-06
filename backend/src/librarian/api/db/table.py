@@ -14,5 +14,5 @@ class TableModel(BaseModel):
 
 
 class Table:
-    def __init__(self, conn: PoolConnectionProxy[Record]) -> None:
+    def __init__(self, conn: PoolConnectionProxy) -> None:
         self.conn = conn
