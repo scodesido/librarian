@@ -61,12 +61,17 @@ class HttpClientSettings(BaseModel):
     pool_size: int = 10
 
 
+class DataFilesSettings(BaseModel):
+    state_counts_interval_seconds: float = 2.0
+
+
 class Settings(YamlSettings):
     api: ApiSettings = ApiSettings()
     database: PostgresSettings = PostgresSettings()
     http_client: HttpClientSettings = HttpClientSettings()
     cookies: CookieSettings = CookieSettings()
     google_oauth: GoogleOAuthSettings = GoogleOAuthSettings()
+    data_files: DataFilesSettings = DataFilesSettings()
 
 
 settings = Settings()

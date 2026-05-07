@@ -1,7 +1,7 @@
 import { Button, Container, Group, Stack, Text, Title } from "@mantine/core";
 import { api } from "../api/client";
 import type { Me } from "../auth/use-auth";
-import FilesList from "./files-list";
+import SyncPanel from "./sync-panel";
 
 interface HomeScreenProps {
   me: Me;
@@ -30,7 +30,7 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
             </Button>
           </Group>
         </Group>
-        <FilesList />
+        <SyncPanel />
       </Stack>
     </Container>
   );

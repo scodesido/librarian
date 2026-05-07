@@ -35,3 +35,12 @@ In fact, locality goes as far as avoiding the use of CSS, and having style live 
 Although this means - in the component definitions, not as ad-hoc changes in component usage.
 
 We use a `my-module.tsx` convention for tsx files. Inside, this would declare a `MyModule` component.
+
+# Docs
+Documentation on architectural decisions should go as numbered markdown files in the `docs/` folder.
+These describe, in historical order, architectural decisions - not tiny implementation details.
+E.g. why a certain tech or pattern is used, more than how it is implemented. 
+The goal is for subsequent modifications to the project to have a clear idea of what the project
+is meant to do, and how the pieces fit together.
+Whenever new changes are proposed, corresponding docs should be added. If changes are decided on an existing
+piece of architecture, of course, the doc of the current workload can still be modified.
