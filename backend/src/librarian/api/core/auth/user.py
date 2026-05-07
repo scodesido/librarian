@@ -2,9 +2,9 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException
 
-from librarian.api.core.db.connect import DbConnection
-from librarian.api.core.db.tables.auth_sessions import AuthSessions
+from librarian.api.db import DbConnection
 from librarian.api.settings import settings
+from librarian.db.tables.auth_sessions import AuthSessions
 
 
 async def current_user(

@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from librarian.api.core.db.table import Table, TableModel
+from librarian.db.table import Table, TableModel
 
 
 class AuthSessionsModel(TableModel):

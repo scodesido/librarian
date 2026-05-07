@@ -1,7 +1,6 @@
 from datetime import datetime
 
-from librarian.api.core.db.table import Table, TableModel
-from librarian.api.core.oauth.google.crypto import decrypt as decrypt_google_token
+from librarian.db.table import Table, TableModel
 
 
 class AuthGoogleModel(TableModel):
@@ -12,10 +11,6 @@ class AuthGoogleModel(TableModel):
     scopes: list[str]
     created_at: datetime
     updated_at: datetime
-
-    @property
-    def refresh_token(self) -> str:
-        return decrypt_google_token(self.refresh_token_enc)
 
 
 class AuthGoogle(Table):

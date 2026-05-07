@@ -1,24 +1,21 @@
 from contextlib import asynccontextmanager
 from typing import Annotated, AsyncIterator
 
-from aiohttp import ClientSession, ClientTimeout, TCPConnector
+from aiohttp import ClientSession
 from fastapi import Depends, FastAPI, Request
 
 from librarian.api.settings import settings
+from librarian.http.client import open_client_session
 
 
 @asynccontextmanager
 async def attach_http_client(app: FastAPI) -> AsyncIterator[None]:
-    client = ClientSession(
-        timeout=ClientTimeout(total=settings.http_client.timeout),
-        connector=TCPConnector(limit=settings.http_client.pool_size),
-    )
-    try:
+    async with open_client_session(settings.http_client) as client:
         app.state.http_client = client
-        yield
-    finally:
-        app.state.http_client = None
-        await client.close()
+        try:
+            yield
+        finally:
+            app.state.http_client = None
 
 
 async def get_http_client(request: Request) -> ClientSession:

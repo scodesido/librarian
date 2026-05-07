@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from librarian.api.core.db.table import Table, TableModel
+from librarian.db.table import Table, TableModel
 
 
 class UsersModel(TableModel):

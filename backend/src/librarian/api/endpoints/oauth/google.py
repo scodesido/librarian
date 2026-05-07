@@ -6,18 +6,18 @@ from fastapi import APIRouter, Cookie, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from librarian.api.core.auth.user import CurrentUser
-from librarian.api.core.db.connect import DbConnection
-from librarian.api.core.db.tables.auth_google import AuthGoogle
-from librarian.api.core.db.tables.auth_sessions import AuthSessions
-from librarian.api.core.db.tables.users import Users
-from librarian.api.core.http.client import HttpClient
-from librarian.api.core.oauth.google.crypto import encrypt as encrypt_google_token
-from librarian.api.core.oauth.google.tokens import (
+from librarian.api.db import DbConnection
+from librarian.api.http import HttpClient
+from librarian.api.settings import settings
+from librarian.db.tables.auth_google import AuthGoogle
+from librarian.db.tables.auth_sessions import AuthSessions
+from librarian.db.tables.users import Users
+from librarian.oauth.google.crypto import encrypt as encrypt_google_token
+from librarian.oauth.google.tokens import (
     build_authorize_url,
     exchange_code,
     fetch_user_info,
 )
-from librarian.api.settings import settings
 
 router = APIRouter(prefix="/oauth/google")
 
@@ -33,7 +33,9 @@ def callback_url(request: Request) -> str:
 @router.get("/login")
 async def login(request: Request) -> RedirectResponse:
     state = token_urlsafe(16)
-    response = RedirectResponse(build_authorize_url(callback_url(request), state))
+    response = RedirectResponse(
+        build_authorize_url(settings.google_oauth, callback_url(request), state)
+    )
     response.set_cookie(
         key=STATE_COOKIE,
         value=state,
@@ -60,15 +62,17 @@ async def callback(
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     redirect_uri = callback_url(request)
-    tokens = await exchange_code(http, code, redirect_uri)
+    tokens = await exchange_code(http, settings.google_oauth, code, redirect_uri)
     if tokens.refresh_token is None:
         raise HTTPException(
             status_code=400,
             detail="No refresh token returned by Google",
         )
-    userinfo = await fetch_user_info(http, tokens.access_token)
+    userinfo = await fetch_user_info(http, settings.google_oauth, tokens.access_token)
 
-    refresh_token_enc = encrypt_google_token(tokens.refresh_token)
+    refresh_token_enc = encrypt_google_token(
+        settings.google_oauth.get_token_encryption_key, tokens.refresh_token
+    )
 
     auth_google = AuthGoogle(conn)
     users = Users(conn)

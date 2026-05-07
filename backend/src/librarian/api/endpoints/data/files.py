@@ -9,12 +9,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from librarian.api.core.auth.user import CurrentUser
-from librarian.api.core.db.connect import DbConnection
-from librarian.api.core.db.tables.auth_google import AuthGoogle
-from librarian.api.core.db.tables.data_files import DataFiles, FileType
-from librarian.api.core.http.client import HttpClient
-from librarian.api.core.oauth.google.tokens import refresh_access_token
+from librarian.api.db import DbConnection
+from librarian.api.http import HttpClient
 from librarian.api.settings import settings
+from librarian.db.tables.auth_google import AuthGoogle
+from librarian.db.tables.data_files import DataFiles, FileType
+from librarian.oauth.google.crypto import decrypt as decrypt_google_token
+from librarian.oauth.google.tokens import refresh_access_token
 
 DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 DRIVE_PAGE_SIZE = 1000
@@ -174,7 +175,12 @@ async def sync(
     if auth is None:
         raise HTTPException(status_code=401, detail="User not connected to Google")
 
-    access_token = await refresh_access_token(http, auth.refresh_token)
+    refresh_token = decrypt_google_token(
+        settings.google_oauth.get_token_encryption_key, auth.refresh_token_enc
+    )
+    access_token = await refresh_access_token(
+        http, settings.google_oauth, refresh_token
+    )
     items = await list_drive_files(http, access_token, body.prefix)
     if not items:
         raise HTTPException(

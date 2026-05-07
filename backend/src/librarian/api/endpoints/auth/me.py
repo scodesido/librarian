@@ -2,8 +2,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from librarian.api.core.auth.user import CurrentUser
-from librarian.api.core.db.connect import DbConnection
-from librarian.api.core.db.tables.auth_google import AuthGoogle
+from librarian.api.db import DbConnection
+from librarian.db.tables.auth_google import AuthGoogle
 
 router = APIRouter(prefix="/auth")
 

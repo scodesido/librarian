@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
-from librarian.api.core.db.table import Table, TableModel
+from librarian.db.table import Table, TableModel
 
 FileSource = Literal["GDRIVE"]
 FileType = Literal["PDF", "TEXT", "OTHER"]
@@ -17,6 +17,9 @@ class DataFilesModel(TableModel):
     state: FileState
     created_at: datetime
     updated_at: datetime
+
+
+SELECT_COLUMNS = "file_id, user_id, path, source, type, state, created_at, updated_at"
 
 
 class DataFiles(Table):
@@ -76,3 +79,41 @@ class DataFiles(Table):
         for row in rows:
             counts[row["state"]] = row["n"]
         return counts
+
+    async def claim_next_pending(self) -> DataFilesModel | None:
+        record = await self.conn.fetchrow(
+            (
+                "UPDATE data_files SET state = 'PROCESSING' "
+                "WHERE file_id = ("
+                "    SELECT file_id FROM data_files "
+                "    WHERE state = 'PENDING' "
+                "    ORDER BY created_at "
+                "    LIMIT 1 "
+                "    FOR UPDATE SKIP LOCKED"
+                ") "
+                f"RETURNING {SELECT_COLUMNS}"
+            ),
+        )
+        return DataFilesModel.from_record(record)
+
+    async def mark_ready(self, file_id: int) -> None:
+        await self.conn.execute(
+            "UPDATE data_files SET state = 'READY' WHERE file_id = $1",
+            file_id,
+        )
+
+    async def mark_failed(self, file_id: int) -> None:
+        await self.conn.execute(
+            "UPDATE data_files SET state = 'FAILED' WHERE file_id = $1",
+            file_id,
+        )
+
+    async def sweep_stale_processing(self, older_than: timedelta) -> int:
+        result: str = await self.conn.execute(
+            (
+                "UPDATE data_files SET state = 'PENDING' "
+                "WHERE state = 'PROCESSING' AND updated_at < now() - $1::interval"
+            ),
+            older_than,
+        )
+        return int(result.rsplit(" ", 1)[-1])
