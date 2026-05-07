@@ -1,12 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  Button,
-  Group,
-  Progress,
-  Stack,
-  Text,
-  TextInput,
-} from "@mantine/core";
+import { Button, Group, Progress, Stack, Text, TextInput } from "@mantine/core";
 import { api } from "../api/client";
 
 interface StateCounts {

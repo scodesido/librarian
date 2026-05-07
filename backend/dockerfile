@@ -82,4 +82,4 @@ COPY --from=dbmate \
 # Add venv to path
 ENV PATH="$APP_DIR/.venv/bin:$PATH"
 
-ENTRYPOINT exec launch-api
+ENTRYPOINT ["launch-api"]

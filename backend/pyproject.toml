@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.14.0",
     "pyyaml>=6.0.3",
     "uvicorn>=0.46.0",
+    "watchfiles>=1.1.1",
 ]
 
 [dependency-groups]
@@ -35,6 +36,7 @@ dev = [
 # Scripts
 [project.scripts]
 launch-api = "librarian.api.main:entrypoint"
+run-service = "librarian.service.main:entrypoint"
 migrate = "librarian.migrate.main:entrypoint"
 
 
