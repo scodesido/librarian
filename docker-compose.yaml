@@ -42,7 +42,9 @@ services:
   librarian-postgres:
     hostname: librarian-postgres
     container_name: librarian-postgres
-    image: postgres:17-alpine
+    image: librarian-postgres:latest
+    build:
+      context: ./backend/db
     environment:
       - POSTGRES_DB=librarian
       - POSTGRES_USER=admin

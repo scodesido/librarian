@@ -5,7 +5,7 @@ from librarian.api.core.db.table import Table, TableModel
 
 FileSource = Literal["GDRIVE"]
 FileType = Literal["PDF", "TEXT", "OTHER"]
-FileState = Literal["PENDING", "READY"]
+FileState = Literal["PENDING", "PROCESSING", "READY", "FAILED"]
 
 
 class DataFilesModel(TableModel):
@@ -67,7 +67,12 @@ class DataFiles(Table):
             "WHERE user_id = $1 GROUP BY state",
             user_id,
         )
-        counts: dict[FileState, int] = {"PENDING": 0, "READY": 0}
+        counts: dict[FileState, int] = {
+            "PENDING": 0,
+            "PROCESSING": 0,
+            "READY": 0,
+            "FAILED": 0,
+        }
         for row in rows:
             counts[row["state"]] = row["n"]
         return counts
