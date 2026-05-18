@@ -1,7 +1,16 @@
-import { Button, Container, Group, Stack, Text, Title } from "@mantine/core";
+import {
+  Button,
+  Container,
+  Divider,
+  Group,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
 import { api } from "../api/client";
 import type { Me } from "../auth/use-auth";
 import SyncPanel from "./sync-panel";
+import TreeExplorer from "./tree-explorer";
 
 interface HomeScreenProps {
   me: Me;
@@ -14,6 +23,10 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
     onLoggedOut();
   };
 
+  // SyncPanel and TreeExplorer are deliberately independent: each owns its
+  // own data, error, and connection state. Promoting either into its own
+  // tab later means lifting one component out and wrapping the parent in
+  // <Tabs>, no internal refactor needed.
   return (
     <Container py="lg">
       <Stack gap="lg">
@@ -31,6 +44,8 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
           </Group>
         </Group>
         <SyncPanel />
+        <Divider />
+        <TreeExplorer />
       </Stack>
     </Container>
   );

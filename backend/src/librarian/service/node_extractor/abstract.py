@@ -31,8 +31,24 @@ def build_node_abstract_agent(
         "group.\n"
         "- domains: one to three domains the group sits in."
     )
-    model = build_llm_model(settings.llm_model, settings.get_anthropic_api_key)
-    return Agent(model, output_type=Abstract, instructions=instructions)
+    api_key = (
+        settings.anthropic_api_key.get_secret_value()
+        if settings.anthropic_api_key is not None
+        else None
+    )
+    model, model_settings = build_llm_model(
+        settings.llm_model,
+        anthropic_api_key=api_key,
+        ollama_host=settings.ollama_host,
+        ollama_num_ctx=settings.ollama_num_ctx,
+    )
+    return Agent(
+        model,
+        output_type=Abstract,
+        instructions=instructions,
+        model_settings=model_settings,
+        retries=settings.llm_output_retries,
+    )
 
 
 async def extract_node_abstract(

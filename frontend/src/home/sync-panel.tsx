@@ -1,24 +1,53 @@
 import { useEffect, useState } from "react";
-import { Button, Group, Progress, Stack, Text, TextInput } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Group,
+  Progress,
+  Stack,
+  Text,
+  TextInput,
+} from "@mantine/core";
 import { api } from "../api/client";
 
-// TODO: update to the new /data/files/pipeline-counts/stream endpoint. The
-// backend now returns a richer PipelineCounts payload
-// ({files_total, files_ready, blobs_total, blobs_in_tree, nodes_total,
-//   nodes_weighted, nodes_abstracted}). The bits below still reference the
-// retired StateCounts shape and the retired /state-counts/stream URL; the
-// stream connection will currently 404.
-interface StateCounts {
-  pending: number;
-  ready: number;
-  total: number;
+interface PipelineCounts {
+  files_total: number;
+  files_ready: number;
+  blobs_total: number;
+  blobs_in_tree: number;
+  nodes_total: number;
+  nodes_weighted: number;
+  nodes_abstracted: number;
 }
 
 const PREFIX_STORAGE_KEY = "librarian.sync_prefix";
 const PREFIX_DEFAULT = "/librarian/";
 
+function StageRow({
+  label,
+  current,
+  total,
+}: {
+  label: string;
+  current: number;
+  total: number;
+}) {
+  const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+  return (
+    <Stack gap={4}>
+      <Group justify="space-between">
+        <Text size="sm">{label}</Text>
+        <Text size="sm" c="dimmed">
+          {current} / {total} ({percent}%)
+        </Text>
+      </Group>
+      <Progress value={percent} />
+    </Stack>
+  );
+}
+
 function SyncPanel() {
-  const [counts, setCounts] = useState<StateCounts | null>(null);
+  const [counts, setCounts] = useState<PipelineCounts | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [prefix, setPrefix] = useState<string>(
     () => localStorage.getItem(PREFIX_STORAGE_KEY) ?? PREFIX_DEFAULT,
@@ -27,11 +56,11 @@ function SyncPanel() {
   const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
-    const url = `${API_URL}/data/files/state-counts/stream`;
+    const url = `${API_URL}/data/files/pipeline-counts/stream`;
     const source = new EventSource(url, { withCredentials: true });
     source.onmessage = (e) => {
       setStreamError(null);
-      setCounts(JSON.parse(e.data) as StateCounts);
+      setCounts(JSON.parse(e.data) as PipelineCounts);
     };
     source.onerror = () => {
       setStreamError("Lost connection to count stream");
@@ -65,10 +94,15 @@ function SyncPanel() {
     }
   };
 
-  const percentReady =
-    counts !== null && counts.total > 0
-      ? Math.round((counts.ready / counts.total) * 100)
-      : 0;
+  const fullyReady =
+    counts !== null &&
+    counts.files_total > 0 &&
+    counts.files_ready === counts.files_total &&
+    counts.blobs_total > 0 &&
+    counts.blobs_in_tree === counts.blobs_total &&
+    counts.nodes_total > 0 &&
+    counts.nodes_weighted === counts.nodes_total &&
+    counts.nodes_abstracted === counts.nodes_total;
 
   return (
     <Stack gap="sm">
@@ -86,12 +120,34 @@ function SyncPanel() {
       {counts === null ? (
         <Text c="dimmed">Connecting…</Text>
       ) : (
-        <>
-          <Text>
-            {counts.total} total · {counts.ready} ready ({percentReady}%)
-          </Text>
-          <Progress value={percentReady} />
-        </>
+        <Stack gap="sm">
+          <Group justify="space-between">
+            <Text fw={500}>Pipeline progress</Text>
+            <Badge color={fullyReady ? "green" : "yellow"} variant="light">
+              {fullyReady ? "Ready for retrieval" : "Building"}
+            </Badge>
+          </Group>
+          <StageRow
+            label="Files synced (ready)"
+            current={counts.files_ready}
+            total={counts.files_total}
+          />
+          <StageRow
+            label="Blobs in tree"
+            current={counts.blobs_in_tree}
+            total={counts.blobs_total}
+          />
+          <StageRow
+            label="Nodes weighted"
+            current={counts.nodes_weighted}
+            total={counts.nodes_total}
+          />
+          <StageRow
+            label="Nodes abstracted"
+            current={counts.nodes_abstracted}
+            total={counts.nodes_total}
+          />
+        </Stack>
       )}
       {streamError !== null && <Text c="red">{streamError}</Text>}
       {syncError !== null && <Text c="red">{syncError}</Text>}

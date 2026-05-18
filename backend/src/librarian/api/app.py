@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from librarian.api.db import attach_db_connection_pool
 from librarian.api.endpoints.auth.me import router as auth_me_router
 from librarian.api.endpoints.data.files import router as data_files_router
+from librarian.api.endpoints.data.tree import router as data_tree_router
 from librarian.api.endpoints.health import router as health_router
 from librarian.api.endpoints.oauth.google import router as oauth_google_router
 from librarian.api.http import attach_http_client
@@ -29,6 +30,7 @@ def create() -> FastAPI:
     app.include_router(oauth_google_router)
     app.include_router(auth_me_router)
     app.include_router(data_files_router)
+    app.include_router(data_tree_router)
 
     app.add_middleware(
         CORSMiddleware,

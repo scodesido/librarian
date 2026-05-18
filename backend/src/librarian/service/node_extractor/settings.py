@@ -15,9 +15,24 @@ class NodeExtractorSettings(BaseModel):
     summary_words: int = 100
     topics_count: int = 5
 
-    # Model selection.
-    llm_model: str = "anthropic:claude-haiku-4-5"
+    # Model selection. Provider prefix picks the backend; see
+    # librarian/service/llm.py. "anthropic:..." or "ollama:..." supported.
+    # llm_model: str = "anthropic:claude-haiku-4-5"
+    llm_model: str = "ollama:qwen3.5:9b"
     anthropic_api_key: SecretStr | None = None
+
+    # Local ollama daemon URL. Default works for non-containerised dev;
+    # in docker-compose the dev config overrides to host.docker.internal.
+    ollama_host: str = "http://localhost:11434"
+
+    # Context window requested from ollama (see BlobExtractorSettings for
+    # the full rationale). 16384 covers a JSON list of children
+    # abstracts comfortably for typical fan-out; bump for very-wide nodes.
+    ollama_num_ctx: int = 16384
+
+    # Number of pydantic-ai retries on Abstract validation failure (see
+    # BlobExtractorSettings.llm_output_retries for the rationale).
+    llm_output_retries: int = 3
 
     @property
     def get_anthropic_api_key(self) -> str:

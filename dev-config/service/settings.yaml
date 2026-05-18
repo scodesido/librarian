@@ -13,6 +13,18 @@ google_oauth:
 
 blob_extractor:
   ollama_host: http://host.docker.internal:11434
+  # Bump for more parallelism across files. Each worker pins one pool
+  # connection during its long-transaction; default pool max is 10, so
+  # there is room to grow further if ollama/Anthropic quotas allow.
+  concurrent_workers: 2
+
+  llm_model: anthropic:claude-haiku-4-5
+  llm_pdf_mode: binary
+
+node_extractor:
+  ollama_host: http://host.docker.internal:11434
+
+  llm_model: anthropic:claude-haiku-4-5
 
 # google_oauth.client_id, .client_secret and .token_encryption_key are
 # expected via env (LIBRARIAN__GOOGLE_OAUTH__CLIENT_ID, _CLIENT_SECRET,

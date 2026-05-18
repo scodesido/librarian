@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from aiohttp import ClientSession
 from asyncpg.pool import PoolConnectionProxy
-from pydantic_ai import Agent
+from pydantic_ai import Agent, BinaryContent
 
 from librarian.common.oauth.google.crypto import decrypt as decrypt_google_token
 from librarian.common.oauth.google.tokens import refresh_access_token
@@ -22,6 +22,7 @@ from librarian.service.blob_extractor.insert import (
     PreparedBlob,
     insert_blobs_end_to_beginning,
 )
+from librarian.service.blob_extractor.pdf_images import pdf_pages_to_pngs
 from librarian.service.blob_extractor.pdf_text import extract_pdf_text
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
 from librarian.service.embedder import Embedder
@@ -39,19 +40,32 @@ class ChunkRecord:
     file_end: int
     llm_content: bytes | str
     llm_media_type: str
+    # PNG bytes of the chunk's pages, in page order. Populated only for
+    # PDF chunks when llm_pdf_mode == "images"; empty list otherwise.
+    llm_images: list[bytes]
     raw_text: str
 
 
-def chunks_for_pdf(pdf_bytes: bytes, pages_per_blob: int) -> list[ChunkRecord]:
+def chunks_for_pdf(
+    pdf_bytes: bytes,
+    pages_per_blob: int,
+    render_images: bool,
+    image_dpi: int,
+) -> list[ChunkRecord]:
+    sub_pdfs = chunk_pdf(pdf_bytes, pages_per_blob)
+    # Render the whole PDF once when we need images, then slice by the
+    # 0-based half-open [start_page, end_page) range of each chunk.
+    page_pngs = pdf_pages_to_pngs(pdf_bytes, image_dpi) if render_images else []
     return [
         ChunkRecord(
             file_start=c.start_page,
             file_end=c.end_page,
             llm_content=c.pdf_bytes,
             llm_media_type="application/pdf",
+            llm_images=page_pngs[c.start_page : c.end_page] if render_images else [],
             raw_text=extract_pdf_text(c.pdf_bytes),
         )
-        for c in chunk_pdf(pdf_bytes, pages_per_blob)
+        for c in sub_pdfs
     ]
 
 
@@ -63,10 +77,35 @@ def chunks_for_text(file_bytes: bytes, words_per_blob: int) -> list[ChunkRecord]
             file_end=c.end_char,
             llm_content=c.text,
             llm_media_type="text/plain",
+            llm_images=[],
             raw_text=c.text,
         )
         for c in chunk_text(text, words_per_blob)
     ]
+
+
+def build_llm_content_parts(chunk: ChunkRecord, mode: str) -> list[str | BinaryContent]:
+    """Compose the per-chunk content sent to the LLM, choosing between
+    extracted text, raw PDF bytes, or page images based on the configured
+    PDF mode. Text-typed chunks always go as text; the mode only affects
+    PDFs.
+    """
+    is_pdf = isinstance(chunk.llm_content, bytes)
+    if not is_pdf or mode == "text":
+        return [f"Blob content:\n\n{chunk.raw_text}"]
+    if mode == "binary":
+        assert isinstance(chunk.llm_content, bytes)
+        return [BinaryContent(data=chunk.llm_content, media_type="application/pdf")]
+    if mode == "images":
+        if not chunk.llm_images:
+            raise ProcessFileError(
+                "llm_pdf_mode is 'images' but the chunk has no rendered "
+                "pages; chunks_for_pdf must be called with render_images=True"
+            )
+        return [
+            BinaryContent(data=png, media_type="image/png") for png in chunk.llm_images
+        ]
+    raise ProcessFileError(f"Unknown llm_pdf_mode: {mode!r}")
 
 
 async def process_file(
@@ -100,7 +139,12 @@ async def process_file(
     file_bytes = await download_file(http, access_token, file.path)
 
     if file.type == "PDF":
-        chunks = chunks_for_pdf(file_bytes, settings.pages_per_blob)
+        chunks = chunks_for_pdf(
+            file_bytes,
+            settings.pages_per_blob,
+            render_images=settings.llm_pdf_mode == "images",
+            image_dpi=settings.pdf_image_dpi,
+        )
     elif file.type == "TEXT":
         chunks = chunks_for_text(file_bytes, settings.words_per_blob)
     else:
@@ -119,9 +163,8 @@ async def process_file(
     previous_running: str | None = None
     n_chunks = len(chunks)
     for i, chunk in enumerate(chunks):
-        abstract = await extract_abstract(
-            agent, chunk.llm_content, chunk.llm_media_type, previous_running
-        )
+        content_parts = build_llm_content_parts(chunk, settings.llm_pdf_mode)
+        abstract = await extract_abstract(agent, content_parts, previous_running)
         abstracts.append(abstract)
         previous_running = abstract.running_summary
         logger.info(
@@ -137,6 +180,8 @@ async def process_file(
         embedder,
         raw_texts=[c.raw_text for c in chunks],
         abstracts=abstracts,
+        chunk_chars=settings.embedding_chunk_chars,
+        chunk_chars_max=settings.embedding_chunk_chars_max,
     )
     embeddings_with_file = compute_with_file_embeddings(embedding_blobs)
 

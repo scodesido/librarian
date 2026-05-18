@@ -206,11 +206,6 @@ async def pipeline_counts_events(
         await asyncio.sleep(interval)
 
 
-# TODO: when the FE consumer (frontend/src/home/sync-panel.tsx) is updated,
-# remove this comment. The endpoint URL changed from
-# /data/files/state-counts/stream to /data/files/pipeline-counts/stream and
-# the payload shape changed from {pending, ready, total} to PipelineCounts
-# (see librarian.db.readiness).
 @router.get("/pipeline-counts/stream")
 async def pipeline_counts_stream(
     user_id: CurrentUser, request: Request
