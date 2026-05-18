@@ -1,7 +1,7 @@
 \restrict dbmate
 
--- Dumped from database version 17.9 (Debian 17.9-1.pgdg12+1)
--- Dumped by pg_dump version 17.9 (Debian 17.9-0+deb13u1)
+-- Dumped from database version 17.10 (Debian 17.10-1.pgdg12+1)
+-- Dumped by pg_dump version 17.10 (Debian 17.10-0+deb13u1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -30,6 +30,283 @@ COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access met
 
 
 --
+-- Name: data_blob_edges_check_height(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_blob_edges_check_height() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    parent_height INT;
+BEGIN
+    SELECT height INTO parent_height FROM data_nodes WHERE node_id = NEW.parent_node_id;
+    IF parent_height IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION
+            'data_blob_edges parent must have height 0, got %',
+            parent_height;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_blob_edges_check_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_blob_edges_check_user_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    parent_user_id BIGINT;
+    blob_user_id   BIGINT;
+BEGIN
+    SELECT user_id INTO parent_user_id FROM data_nodes WHERE node_id = NEW.parent_node_id;
+    SELECT user_id INTO blob_user_id  FROM data_blobs WHERE blob_id = NEW.child_blob_id;
+    IF parent_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_blob_edges parent user_id mismatch with data_nodes';
+    END IF;
+    IF blob_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_blob_edges child user_id mismatch with data_blobs';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_blob_edges_invalidate_parent(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_blob_edges_invalidate_parent() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    target_parent_id BIGINT;
+BEGIN
+    target_parent_id := COALESCE(NEW.parent_node_id, OLD.parent_node_id);
+    DELETE FROM data_node_weights WHERE node_id = target_parent_id;
+    DELETE FROM data_node_abstracts WHERE node_id = target_parent_id;
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_blobs_delete_owning_file(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_blobs_delete_owning_file() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM data_files WHERE file_id = OLD.file_id;
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_node_abstracts_check_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_node_abstracts_check_user_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    node_user_id BIGINT;
+BEGIN
+    SELECT user_id INTO node_user_id FROM data_nodes WHERE node_id = NEW.node_id;
+    IF node_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_node_abstracts user_id mismatch with data_nodes';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_node_abstracts_invalidate_parents(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_node_abstracts_invalidate_parents() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    target_node_id BIGINT;
+BEGIN
+    target_node_id := COALESCE(NEW.node_id, OLD.node_id);
+    DELETE FROM data_node_abstracts
+    WHERE node_id IN (
+        SELECT parent_node_id FROM data_node_edges
+        WHERE child_node_id = target_node_id
+    );
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_node_edges_check_height(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_node_edges_check_height() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    parent_height INT;
+    child_height  INT;
+BEGIN
+    SELECT height INTO parent_height FROM data_nodes WHERE node_id = NEW.parent_node_id;
+    SELECT height INTO child_height  FROM data_nodes WHERE node_id = NEW.child_node_id;
+    IF parent_height IS DISTINCT FROM child_height + 1 THEN
+        RAISE EXCEPTION
+            'data_node_edges height mismatch: parent height %, child height %, '
+            'expected parent height %',
+            parent_height, child_height, child_height + 1;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_node_edges_check_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_node_edges_check_user_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    parent_user_id BIGINT;
+    child_user_id  BIGINT;
+BEGIN
+    SELECT user_id INTO parent_user_id FROM data_nodes WHERE node_id = NEW.parent_node_id;
+    SELECT user_id INTO child_user_id  FROM data_nodes WHERE node_id = NEW.child_node_id;
+    IF parent_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_node_edges parent user_id mismatch with data_nodes';
+    END IF;
+    IF child_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_node_edges child user_id mismatch with data_nodes';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_node_edges_invalidate_parent(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_node_edges_invalidate_parent() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    target_parent_id BIGINT;
+BEGIN
+    target_parent_id := COALESCE(NEW.parent_node_id, OLD.parent_node_id);
+    DELETE FROM data_node_weights WHERE node_id = target_parent_id;
+    DELETE FROM data_node_abstracts WHERE node_id = target_parent_id;
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_node_weights_check_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_node_weights_check_user_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    node_user_id BIGINT;
+BEGIN
+    SELECT user_id INTO node_user_id FROM data_nodes WHERE node_id = NEW.node_id;
+    IF node_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_node_weights user_id mismatch with data_nodes';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_node_weights_invalidate_parents(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_node_weights_invalidate_parents() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    target_node_id BIGINT;
+BEGIN
+    target_node_id := COALESCE(NEW.node_id, OLD.node_id);
+    DELETE FROM data_node_weights
+    WHERE node_id IN (
+        SELECT parent_node_id FROM data_node_edges
+        WHERE child_node_id = target_node_id
+    );
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_nodes_check_root_unique(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_nodes_check_root_unique() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    root_count INT;
+BEGIN
+    SELECT count(*) INTO root_count
+    FROM data_nodes
+    WHERE user_id = NEW.user_id AND is_root = TRUE;
+    IF root_count > 1 THEN
+        RAISE EXCEPTION 'user % has more than one root node', NEW.user_id;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_nodes_drop_if_orphan(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_nodes_drop_if_orphan() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM data_nodes dn
+    WHERE dn.node_id = OLD.parent_node_id
+      AND dn.is_root = FALSE
+      AND NOT EXISTS (SELECT 1 FROM data_node_edges
+                      WHERE parent_node_id = dn.node_id)
+      AND NOT EXISTS (SELECT 1 FROM data_blob_edges
+                      WHERE parent_node_id = dn.node_id);
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: prevent_any_update(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.prevent_any_update() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'rows of this table are immutable; UPDATE is rejected';
+END;
+$$;
+
+
+--
 -- Name: prevent_created_at_change(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -55,48 +332,6 @@ CREATE FUNCTION public.set_updated_at() RETURNS trigger
 BEGIN
     NEW.updated_at = now();
     RETURN NEW;
-END;
-$$;
-
-
---
--- Name: tree_edges_check_height(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.tree_edges_check_height() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-DECLARE
-    parent_height INT;
-    child_height  INT;
-BEGIN
-    SELECT height INTO parent_height FROM tree_nodes WHERE node_id = NEW.parent_id;
-    SELECT height INTO child_height  FROM tree_nodes WHERE node_id = NEW.child_id;
-    IF parent_height IS DISTINCT FROM child_height + 1 THEN
-        RAISE EXCEPTION
-            'tree_edges height mismatch: parent height %, child height %, '
-            'expected parent height %',
-            parent_height, child_height, child_height + 1;
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-
---
--- Name: tree_edges_delete_orphan_parent(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.tree_edges_delete_orphan_parent() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM tree_edges WHERE parent_id = OLD.parent_id
-    ) THEN
-        DELETE FROM tree_nodes WHERE node_id = OLD.parent_id;
-    END IF;
-    RETURN NULL;
 END;
 $$;
 
@@ -133,16 +368,58 @@ CREATE TABLE public.auth_sessions (
 
 
 --
+-- Name: data_blob_edges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.data_blob_edges (
+    blob_edge_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    parent_node_id bigint NOT NULL,
+    child_blob_id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: data_blob_edges_blob_edge_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.data_blob_edges_blob_edge_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: data_blob_edges_blob_edge_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.data_blob_edges_blob_edge_id_seq OWNED BY public.data_blob_edges.blob_edge_id;
+
+
+--
 -- Name: data_blobs; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.data_blobs (
     blob_id bigint NOT NULL,
+    user_id bigint NOT NULL,
     file_id bigint NOT NULL,
-    start integer NOT NULL,
-    "end" integer NOT NULL,
+    file_blob_index integer NOT NULL,
+    file_start integer NOT NULL,
+    file_end integer NOT NULL,
+    is_final_blob boolean NOT NULL,
+    next_blob_id bigint,
+    embedding_blob public.vector(1024) NOT NULL,
+    embedding_with_file public.vector(1024) NOT NULL,
+    abstract jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    CONSTRAINT data_blobs_check CHECK ((file_end > file_start)),
+    CONSTRAINT data_blobs_check1 CHECK (((next_blob_id IS NULL) = is_final_blob)),
+    CONSTRAINT data_blobs_file_blob_index_check CHECK ((file_blob_index >= 0)),
+    CONSTRAINT data_blobs_file_start_check CHECK ((file_start >= 0))
 );
 
 
@@ -175,11 +452,9 @@ CREATE TABLE public.data_files (
     path text NOT NULL,
     source text NOT NULL,
     type text NOT NULL,
-    state text NOT NULL,
+    source_modified_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT data_files_source_check CHECK ((source = 'GDRIVE'::text)),
-    CONSTRAINT data_files_state_check CHECK ((state = ANY (ARRAY['PENDING'::text, 'PROCESSING'::text, 'READY'::text, 'FAILED'::text]))),
     CONSTRAINT data_files_type_check CHECK ((type = ANY (ARRAY['PDF'::text, 'TEXT'::text, 'OTHER'::text])))
 );
 
@@ -204,16 +479,135 @@ ALTER SEQUENCE public.data_files_file_id_seq OWNED BY public.data_files.file_id;
 
 
 --
--- Name: node_embeddings; Type: TABLE; Schema: public; Owner: -
+-- Name: data_node_abstracts; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.node_embeddings (
+CREATE TABLE public.data_node_abstracts (
+    node_abstract_id bigint NOT NULL,
+    user_id bigint NOT NULL,
     node_id bigint NOT NULL,
-    field text NOT NULL,
-    model_id text NOT NULL,
-    embedding public.vector(1024) NOT NULL,
+    abstract jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: data_node_abstracts_node_abstract_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.data_node_abstracts_node_abstract_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: data_node_abstracts_node_abstract_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.data_node_abstracts_node_abstract_id_seq OWNED BY public.data_node_abstracts.node_abstract_id;
+
+
+--
+-- Name: data_node_edges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.data_node_edges (
+    node_edge_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    parent_node_id bigint NOT NULL,
+    child_node_id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT data_node_edges_check CHECK ((parent_node_id <> child_node_id))
+);
+
+
+--
+-- Name: data_node_edges_node_edge_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.data_node_edges_node_edge_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: data_node_edges_node_edge_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.data_node_edges_node_edge_id_seq OWNED BY public.data_node_edges.node_edge_id;
+
+
+--
+-- Name: data_node_weights; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.data_node_weights (
+    node_weight_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    node_id bigint NOT NULL,
+    centroid public.vector(1024) NOT NULL,
+    blob_count integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT data_node_weights_blob_count_check CHECK ((blob_count > 0))
+);
+
+
+--
+-- Name: data_node_weights_node_weight_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.data_node_weights_node_weight_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: data_node_weights_node_weight_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.data_node_weights_node_weight_id_seq OWNED BY public.data_node_weights.node_weight_id;
+
+
+--
+-- Name: data_nodes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.data_nodes (
+    node_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    is_root boolean DEFAULT false NOT NULL,
+    height integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT data_nodes_height_check CHECK ((height >= 0))
+);
+
+
+--
+-- Name: data_nodes_node_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.data_nodes_node_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: data_nodes_node_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.data_nodes_node_id_seq OWNED BY public.data_nodes.node_id;
 
 
 --
@@ -222,88 +616,6 @@ CREATE TABLE public.node_embeddings (
 
 CREATE TABLE public.schema_migrations (
     version character varying NOT NULL
-);
-
-
---
--- Name: tree_edges; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.tree_edges (
-    edge_id bigint NOT NULL,
-    parent_id bigint NOT NULL,
-    child_id bigint NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT tree_edges_check CHECK ((parent_id <> child_id))
-);
-
-
---
--- Name: tree_edges_edge_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.tree_edges_edge_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: tree_edges_edge_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.tree_edges_edge_id_seq OWNED BY public.tree_edges.edge_id;
-
-
---
--- Name: tree_nodes; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.tree_nodes (
-    node_id bigint NOT NULL,
-    user_id bigint NOT NULL,
-    blob_id bigint,
-    abstract jsonb,
-    height integer NOT NULL,
-    state text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT tree_nodes_height_check CHECK ((height >= 0)),
-    CONSTRAINT tree_nodes_leaf_invariant CHECK ((((height = 0) AND (blob_id IS NOT NULL) AND (state = 'READY'::text)) OR ((height > 0) AND (blob_id IS NULL)))),
-    CONSTRAINT tree_nodes_state_check CHECK ((state = ANY (ARRAY['PENDING'::text, 'PROCESSING'::text, 'READY'::text, 'FAILED'::text])))
-);
-
-
---
--- Name: tree_nodes_node_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.tree_nodes_node_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: tree_nodes_node_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.tree_nodes_node_id_seq OWNED BY public.tree_nodes.node_id;
-
-
---
--- Name: tree_state; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.tree_state (
-    user_id bigint NOT NULL,
-    level integer DEFAULT 0 NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT tree_state_level_check CHECK ((level >= 0))
 );
 
 
@@ -339,6 +651,13 @@ ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
 
 
 --
+-- Name: data_blob_edges blob_edge_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_edges ALTER COLUMN blob_edge_id SET DEFAULT nextval('public.data_blob_edges_blob_edge_id_seq'::regclass);
+
+
+--
 -- Name: data_blobs blob_id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -353,17 +672,31 @@ ALTER TABLE ONLY public.data_files ALTER COLUMN file_id SET DEFAULT nextval('pub
 
 
 --
--- Name: tree_edges edge_id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: data_node_abstracts node_abstract_id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.tree_edges ALTER COLUMN edge_id SET DEFAULT nextval('public.tree_edges_edge_id_seq'::regclass);
+ALTER TABLE ONLY public.data_node_abstracts ALTER COLUMN node_abstract_id SET DEFAULT nextval('public.data_node_abstracts_node_abstract_id_seq'::regclass);
 
 
 --
--- Name: tree_nodes node_id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: data_node_edges node_edge_id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.tree_nodes ALTER COLUMN node_id SET DEFAULT nextval('public.tree_nodes_node_id_seq'::regclass);
+ALTER TABLE ONLY public.data_node_edges ALTER COLUMN node_edge_id SET DEFAULT nextval('public.data_node_edges_node_edge_id_seq'::regclass);
+
+
+--
+-- Name: data_node_weights node_weight_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_weights ALTER COLUMN node_weight_id SET DEFAULT nextval('public.data_node_weights_node_weight_id_seq'::regclass);
+
+
+--
+-- Name: data_nodes node_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_nodes ALTER COLUMN node_id SET DEFAULT nextval('public.data_nodes_node_id_seq'::regclass);
 
 
 --
@@ -398,6 +731,30 @@ ALTER TABLE ONLY public.auth_sessions
 
 
 --
+-- Name: data_blob_edges data_blob_edges_child_blob_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_edges
+    ADD CONSTRAINT data_blob_edges_child_blob_id_key UNIQUE (child_blob_id);
+
+
+--
+-- Name: data_blob_edges data_blob_edges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_edges
+    ADD CONSTRAINT data_blob_edges_pkey PRIMARY KEY (blob_edge_id);
+
+
+--
+-- Name: data_blobs data_blobs_file_id_file_blob_index_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blobs
+    ADD CONSTRAINT data_blobs_file_id_file_blob_index_key UNIQUE (file_id, file_blob_index);
+
+
+--
 -- Name: data_blobs data_blobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -422,11 +779,59 @@ ALTER TABLE ONLY public.data_files
 
 
 --
--- Name: node_embeddings node_embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: data_node_abstracts data_node_abstracts_node_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.node_embeddings
-    ADD CONSTRAINT node_embeddings_pkey PRIMARY KEY (node_id, field, model_id);
+ALTER TABLE ONLY public.data_node_abstracts
+    ADD CONSTRAINT data_node_abstracts_node_id_key UNIQUE (node_id);
+
+
+--
+-- Name: data_node_abstracts data_node_abstracts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_abstracts
+    ADD CONSTRAINT data_node_abstracts_pkey PRIMARY KEY (node_abstract_id);
+
+
+--
+-- Name: data_node_edges data_node_edges_parent_node_id_child_node_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_edges
+    ADD CONSTRAINT data_node_edges_parent_node_id_child_node_id_key UNIQUE (parent_node_id, child_node_id);
+
+
+--
+-- Name: data_node_edges data_node_edges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_edges
+    ADD CONSTRAINT data_node_edges_pkey PRIMARY KEY (node_edge_id);
+
+
+--
+-- Name: data_node_weights data_node_weights_node_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_weights
+    ADD CONSTRAINT data_node_weights_node_id_key UNIQUE (node_id);
+
+
+--
+-- Name: data_node_weights data_node_weights_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_weights
+    ADD CONSTRAINT data_node_weights_pkey PRIMARY KEY (node_weight_id);
+
+
+--
+-- Name: data_nodes data_nodes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_nodes
+    ADD CONSTRAINT data_nodes_pkey PRIMARY KEY (node_id);
 
 
 --
@@ -438,51 +843,18 @@ ALTER TABLE ONLY public.schema_migrations
 
 
 --
--- Name: tree_edges tree_edges_parent_id_child_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tree_edges
-    ADD CONSTRAINT tree_edges_parent_id_child_id_key UNIQUE (parent_id, child_id);
-
-
---
--- Name: tree_edges tree_edges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tree_edges
-    ADD CONSTRAINT tree_edges_pkey PRIMARY KEY (edge_id);
-
-
---
--- Name: tree_nodes tree_nodes_blob_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tree_nodes
-    ADD CONSTRAINT tree_nodes_blob_id_key UNIQUE (blob_id);
-
-
---
--- Name: tree_nodes tree_nodes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tree_nodes
-    ADD CONSTRAINT tree_nodes_pkey PRIMARY KEY (node_id);
-
-
---
--- Name: tree_state tree_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tree_state
-    ADD CONSTRAINT tree_state_pkey PRIMARY KEY (user_id);
-
-
---
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: data_blobs_one_final_per_file; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX data_blobs_one_final_per_file ON public.data_blobs USING btree (file_id) WHERE is_final_blob;
 
 
 --
@@ -507,31 +879,59 @@ CREATE INDEX idx_auth_sessions_user_id ON public.auth_sessions USING btree (user
 
 
 --
--- Name: idx_data_blobs_file_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_data_blob_edges_user_parent; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_data_blobs_file_id ON public.data_blobs USING btree (file_id);
-
-
---
--- Name: idx_data_files_user_state; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_data_files_user_state ON public.data_files USING btree (user_id, state);
+CREATE INDEX idx_data_blob_edges_user_parent ON public.data_blob_edges USING btree (user_id, parent_node_id);
 
 
 --
--- Name: idx_tree_edges_child_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_data_blobs_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_tree_edges_child_id ON public.tree_edges USING btree (child_id);
+CREATE INDEX idx_data_blobs_user_id ON public.data_blobs USING btree (user_id);
 
 
 --
--- Name: idx_tree_nodes_user_height_state; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_data_node_abstracts_user; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_tree_nodes_user_height_state ON public.tree_nodes USING btree (user_id, height, state);
+CREATE INDEX idx_data_node_abstracts_user ON public.data_node_abstracts USING btree (user_id);
+
+
+--
+-- Name: idx_data_node_edges_child; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_node_edges_child ON public.data_node_edges USING btree (child_node_id);
+
+
+--
+-- Name: idx_data_node_edges_user_parent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_node_edges_user_parent ON public.data_node_edges USING btree (user_id, parent_node_id);
+
+
+--
+-- Name: idx_data_node_weights_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_node_weights_user ON public.data_node_weights USING btree (user_id);
+
+
+--
+-- Name: idx_data_nodes_user_height; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_nodes_user_height ON public.data_nodes USING btree (user_id, height);
+
+
+--
+-- Name: idx_data_nodes_user_root; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_nodes_user_root ON public.data_nodes USING btree (user_id) WHERE is_root;
 
 
 --
@@ -556,66 +956,150 @@ CREATE TRIGGER auth_sessions_prevent_created_at_change BEFORE UPDATE ON public.a
 
 
 --
--- Name: data_blobs data_blobs_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+-- Name: data_blob_edges data_blob_edges_check_height; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER data_blobs_prevent_created_at_change BEFORE UPDATE ON public.data_blobs FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
-
-
---
--- Name: data_blobs data_blobs_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER data_blobs_set_updated_at BEFORE UPDATE ON public.data_blobs FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER data_blob_edges_check_height BEFORE INSERT ON public.data_blob_edges FOR EACH ROW EXECUTE FUNCTION public.data_blob_edges_check_height();
 
 
 --
--- Name: data_files data_files_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+-- Name: data_blob_edges data_blob_edges_check_user_id; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER data_files_prevent_created_at_change BEFORE UPDATE ON public.data_files FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
-
-
---
--- Name: data_files data_files_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER data_files_set_updated_at BEFORE UPDATE ON public.data_files FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER data_blob_edges_check_user_id BEFORE INSERT ON public.data_blob_edges FOR EACH ROW EXECUTE FUNCTION public.data_blob_edges_check_user_id();
 
 
 --
--- Name: tree_edges tree_edges_check_height; Type: TRIGGER; Schema: public; Owner: -
+-- Name: data_blob_edges data_blob_edges_drop_orphan_parent; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER tree_edges_check_height BEFORE INSERT OR UPDATE ON public.tree_edges FOR EACH ROW EXECUTE FUNCTION public.tree_edges_check_height();
-
-
---
--- Name: tree_edges tree_edges_delete_orphan_parent; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER tree_edges_delete_orphan_parent AFTER DELETE ON public.tree_edges FOR EACH ROW EXECUTE FUNCTION public.tree_edges_delete_orphan_parent();
+CREATE CONSTRAINT TRIGGER data_blob_edges_drop_orphan_parent AFTER DELETE ON public.data_blob_edges DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.data_nodes_drop_if_orphan();
 
 
 --
--- Name: tree_nodes tree_nodes_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+-- Name: data_blob_edges data_blob_edges_invalidate_parent; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER tree_nodes_prevent_created_at_change BEFORE UPDATE ON public.tree_nodes FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
-
-
---
--- Name: tree_nodes tree_nodes_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER tree_nodes_set_updated_at BEFORE UPDATE ON public.tree_nodes FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER data_blob_edges_invalidate_parent AFTER INSERT OR DELETE ON public.data_blob_edges FOR EACH ROW EXECUTE FUNCTION public.data_blob_edges_invalidate_parent();
 
 
 --
--- Name: tree_state tree_state_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: data_blob_edges data_blob_edges_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER tree_state_set_updated_at BEFORE UPDATE ON public.tree_state FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER data_blob_edges_prevent_any_update BEFORE UPDATE ON public.data_blob_edges FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_blobs data_blobs_delete_owning_file; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_blobs_delete_owning_file AFTER DELETE ON public.data_blobs FOR EACH ROW EXECUTE FUNCTION public.data_blobs_delete_owning_file();
+
+
+--
+-- Name: data_blobs data_blobs_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_blobs_prevent_any_update BEFORE UPDATE ON public.data_blobs FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_files data_files_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_files_prevent_any_update BEFORE UPDATE ON public.data_files FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_node_abstracts data_node_abstracts_check_user_id; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_abstracts_check_user_id BEFORE INSERT ON public.data_node_abstracts FOR EACH ROW EXECUTE FUNCTION public.data_node_abstracts_check_user_id();
+
+
+--
+-- Name: data_node_abstracts data_node_abstracts_invalidate_parents; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_abstracts_invalidate_parents AFTER INSERT OR DELETE ON public.data_node_abstracts FOR EACH ROW EXECUTE FUNCTION public.data_node_abstracts_invalidate_parents();
+
+
+--
+-- Name: data_node_abstracts data_node_abstracts_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_abstracts_prevent_any_update BEFORE UPDATE ON public.data_node_abstracts FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_node_edges data_node_edges_check_height; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_edges_check_height BEFORE INSERT ON public.data_node_edges FOR EACH ROW EXECUTE FUNCTION public.data_node_edges_check_height();
+
+
+--
+-- Name: data_node_edges data_node_edges_check_user_id; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_edges_check_user_id BEFORE INSERT ON public.data_node_edges FOR EACH ROW EXECUTE FUNCTION public.data_node_edges_check_user_id();
+
+
+--
+-- Name: data_node_edges data_node_edges_drop_orphan_parent; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER data_node_edges_drop_orphan_parent AFTER DELETE ON public.data_node_edges DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.data_nodes_drop_if_orphan();
+
+
+--
+-- Name: data_node_edges data_node_edges_invalidate_parent; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_edges_invalidate_parent AFTER INSERT OR DELETE ON public.data_node_edges FOR EACH ROW EXECUTE FUNCTION public.data_node_edges_invalidate_parent();
+
+
+--
+-- Name: data_node_edges data_node_edges_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_edges_prevent_any_update BEFORE UPDATE ON public.data_node_edges FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_node_weights data_node_weights_check_user_id; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_weights_check_user_id BEFORE INSERT ON public.data_node_weights FOR EACH ROW EXECUTE FUNCTION public.data_node_weights_check_user_id();
+
+
+--
+-- Name: data_node_weights data_node_weights_invalidate_parents; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_weights_invalidate_parents AFTER INSERT OR DELETE ON public.data_node_weights FOR EACH ROW EXECUTE FUNCTION public.data_node_weights_invalidate_parents();
+
+
+--
+-- Name: data_node_weights data_node_weights_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_node_weights_prevent_any_update BEFORE UPDATE ON public.data_node_weights FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_nodes data_nodes_check_root_unique; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER data_nodes_check_root_unique AFTER INSERT ON public.data_nodes DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN ((new.is_root = true)) EXECUTE FUNCTION public.data_nodes_check_root_unique();
+
+
+--
+-- Name: data_nodes data_nodes_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_nodes_prevent_any_update BEFORE UPDATE ON public.data_nodes FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
 
 
 --
@@ -649,11 +1133,51 @@ ALTER TABLE ONLY public.auth_sessions
 
 
 --
+-- Name: data_blob_edges data_blob_edges_child_blob_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_edges
+    ADD CONSTRAINT data_blob_edges_child_blob_id_fkey FOREIGN KEY (child_blob_id) REFERENCES public.data_blobs(blob_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_blob_edges data_blob_edges_parent_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_edges
+    ADD CONSTRAINT data_blob_edges_parent_node_id_fkey FOREIGN KEY (parent_node_id) REFERENCES public.data_nodes(node_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_blob_edges data_blob_edges_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_edges
+    ADD CONSTRAINT data_blob_edges_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: data_blobs data_blobs_file_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.data_blobs
     ADD CONSTRAINT data_blobs_file_id_fkey FOREIGN KEY (file_id) REFERENCES public.data_files(file_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_blobs data_blobs_next_blob_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blobs
+    ADD CONSTRAINT data_blobs_next_blob_id_fkey FOREIGN KEY (next_blob_id) REFERENCES public.data_blobs(blob_id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: data_blobs data_blobs_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blobs
+    ADD CONSTRAINT data_blobs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --
@@ -665,51 +1189,67 @@ ALTER TABLE ONLY public.data_files
 
 
 --
--- Name: node_embeddings node_embeddings_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: data_node_abstracts data_node_abstracts_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.node_embeddings
-    ADD CONSTRAINT node_embeddings_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.tree_nodes(node_id) ON DELETE CASCADE;
-
-
---
--- Name: tree_edges tree_edges_child_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tree_edges
-    ADD CONSTRAINT tree_edges_child_id_fkey FOREIGN KEY (child_id) REFERENCES public.tree_nodes(node_id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.data_node_abstracts
+    ADD CONSTRAINT data_node_abstracts_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.data_nodes(node_id) ON DELETE CASCADE;
 
 
 --
--- Name: tree_edges tree_edges_parent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: data_node_abstracts data_node_abstracts_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.tree_edges
-    ADD CONSTRAINT tree_edges_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.tree_nodes(node_id) ON DELETE CASCADE;
-
-
---
--- Name: tree_nodes tree_nodes_blob_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tree_nodes
-    ADD CONSTRAINT tree_nodes_blob_id_fkey FOREIGN KEY (blob_id) REFERENCES public.data_blobs(blob_id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.data_node_abstracts
+    ADD CONSTRAINT data_node_abstracts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --
--- Name: tree_nodes tree_nodes_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: data_node_edges data_node_edges_child_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.tree_nodes
-    ADD CONSTRAINT tree_nodes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.data_node_edges
+    ADD CONSTRAINT data_node_edges_child_node_id_fkey FOREIGN KEY (child_node_id) REFERENCES public.data_nodes(node_id) ON DELETE CASCADE;
 
 
 --
--- Name: tree_state tree_state_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: data_node_edges data_node_edges_parent_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.tree_state
-    ADD CONSTRAINT tree_state_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.data_node_edges
+    ADD CONSTRAINT data_node_edges_parent_node_id_fkey FOREIGN KEY (parent_node_id) REFERENCES public.data_nodes(node_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_node_edges data_node_edges_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_edges
+    ADD CONSTRAINT data_node_edges_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_node_weights data_node_weights_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_weights
+    ADD CONSTRAINT data_node_weights_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.data_nodes(node_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_node_weights data_node_weights_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_node_weights
+    ADD CONSTRAINT data_node_weights_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_nodes data_nodes_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_nodes
+    ADD CONSTRAINT data_nodes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --
@@ -724,8 +1264,10 @@ ALTER TABLE ONLY public.tree_state
 --
 
 INSERT INTO public.schema_migrations (version) VALUES
-    ('20260506075609'),
-    ('20260507093602'),
-    ('20260507141158'),
-    ('20260507142213'),
-    ('20260507142223');
+    ('202605060001'),
+    ('202605180001'),
+    ('202605180002'),
+    ('202605180003'),
+    ('202605180004'),
+    ('202605180005'),
+    ('202605180006');

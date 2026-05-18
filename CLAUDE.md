@@ -1,6 +1,10 @@
 # Backend Python style and conventions
 Below is some guidance on how to write code for this repo. However, first and foremost, what the repo should be is defined by what the repo is.
-Do always take a look at existing code and conventions in relevant or similar files, and use that as your main guidance. In case of conflict or doubt, ask.
+Do always take a look at existing code and conventions in relevant or similar files, and use that as your main guidance. In particular,
+- `backend/src/` The python code of the backend, including API and services.
+- `backend/db/` The migrations and current schema of the DB the backend will interact with. Always take the migrations as source truth - the schema might be outdated.
+- `docs/` The architectural documentation explaining the choices made in the codebase.
+In case of conflict or doubt, ask.
 
 As a general principle, you can edit source files in the repo. But for anything else - in particular, running commands - ask the user instead.
 
@@ -9,14 +13,20 @@ We keep files and functions small, idiomatic, and hierarchical. It should be cle
 and where to find it (meaningful folder hierarchy). The same applies to variable and function names. Consistency across the codebase matters enormously -
 do ask the user in case of doubt about conventions.
 
+Additionally, we make good use of modules. Rather than having lots of small modules in a largely flat setup, add submodules when it would help navigating
+the code for a person visiting the repo for the first time. For instance, if a `settings.py` module defines a settings BaseModel, then any nested settings
+modules should go in submodules. Or if an `auth.py` module provides an abstraction for an auth layer, concrete implementation also go into submodules.
+
 ## Classes
 We try to avoid complex OOP patterns. Classes are fine, but typically these should be Pydantic models (i.e. "structs" in other languages),
 with possibly helper methods that very directly map to the class. E.g. derived properties or cached properties, simple factory patterns
 (e.g. creating a Client object from a Settings object, but the Client object should still be defined elsewhere.)
 
+## Other
 Do not use `_private_function` naming convention for functions.
 
 Use always `from ... import ...` imports, if needed use aliases `... as ...`. Avoid raw `import ...`. Avoid `__init__.py` initializers when possible.
+
 
 ## API
 The API endpoints should live in their own files under endpoints/. The folder structure should map to the API path structure.
