@@ -12,10 +12,11 @@ from librarian.api.core.auth.user import CurrentUser
 from librarian.api.db import DbConnection
 from librarian.api.http import HttpClient
 from librarian.api.settings import settings
+from librarian.common.oauth.google.crypto import decrypt as decrypt_google_token
+from librarian.common.oauth.google.tokens import refresh_access_token
+from librarian.db.readiness import count_user_pipeline
 from librarian.db.tables.auth_google import AuthGoogle
 from librarian.db.tables.data_files import DataFiles, FileType
-from librarian.oauth.google.crypto import decrypt as decrypt_google_token
-from librarian.oauth.google.tokens import refresh_access_token
 
 DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 DRIVE_PAGE_SIZE = 1000
@@ -32,12 +33,6 @@ class SyncRequest(BaseModel):
 class SyncResponse(BaseModel):
     added: int
     removed: int
-
-
-class StateCounts(BaseModel):
-    pending: int
-    ready: int
-    total: int
 
 
 def classify_mime(mime: str) -> FileType:
@@ -164,6 +159,12 @@ async def list_drive_files(
     return await list_files_recursive(http, access_token, folder_id)
 
 
+# TODO: also fetch modifiedTime from Drive and pass it through to
+# data_files.source_modified_at. On a second sync pass, compare it against
+# the stored value: if Drive's is newer, delete the row (cascading blobs +
+# tree edges via the FK chain) and let insert_missing pick it up fresh. The
+# column is already in the schema; only the sync layer and DataFiles
+# accessor need to grow this branch.
 @router.post("/sync", response_model=SyncResponse)
 async def sync(
     user_id: CurrentUser,
@@ -195,31 +196,31 @@ async def sync(
     return SyncResponse(added=added, removed=removed)
 
 
-async def state_counts_events(
+async def pipeline_counts_events(
     pool: Pool, user_id: int, interval: float
 ) -> AsyncIterator[bytes]:
     while True:
         async with pool.acquire() as conn:
-            counts = await DataFiles(conn).count_by_state(user_id)
-        payload = StateCounts(
-            pending=counts["PENDING"],
-            ready=counts["READY"],
-            total=counts["PENDING"] + counts["READY"],
-        )
-        yield f"data: {json.dumps(payload.model_dump())}\n\n".encode()
+            counts = await count_user_pipeline(conn, user_id)
+        yield f"data: {json.dumps(counts.model_dump())}\n\n".encode()
         await asyncio.sleep(interval)
 
 
-@router.get("/state-counts/stream")
-async def state_counts_stream(
+# TODO: when the FE consumer (frontend/src/home/sync-panel.tsx) is updated,
+# remove this comment. The endpoint URL changed from
+# /data/files/state-counts/stream to /data/files/pipeline-counts/stream and
+# the payload shape changed from {pending, ready, total} to PipelineCounts
+# (see librarian.db.readiness).
+@router.get("/pipeline-counts/stream")
+async def pipeline_counts_stream(
     user_id: CurrentUser, request: Request
 ) -> StreamingResponse:
     pool: Pool | None = request.app.state.db_connection_pool
     if pool is None:
         raise ValueError("No database connection pool available")
     return StreamingResponse(
-        state_counts_events(
-            pool, user_id, settings.data_files.state_counts_interval_seconds
+        pipeline_counts_events(
+            pool, user_id, settings.data_files.pipeline_counts_interval_seconds
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

@@ -1,9 +1,9 @@
 from pydantic import BaseModel
 
-from librarian.settings.base import YamlSettings
-from librarian.settings.google_oauth import GoogleOAuthSettings
-from librarian.settings.http_client import HttpClientSettings
-from librarian.settings.postgres import PostgresSettings
+from librarian.common.settings.base import YamlSettings
+from librarian.common.settings.google_oauth import GoogleOAuthSettings
+from librarian.common.settings.http_client import HttpClientSettings
+from librarian.common.settings.postgres import PostgresSettings
 
 
 class ApiSettings(BaseModel):
@@ -22,7 +22,7 @@ class CookieSettings(BaseModel):
 
 
 class DataFilesSettings(BaseModel):
-    state_counts_interval_seconds: float = 2.0
+    pipeline_counts_interval_seconds: float = 2.0
 
 
 class Settings(YamlSettings):

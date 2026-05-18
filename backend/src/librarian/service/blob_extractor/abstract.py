@@ -3,7 +3,7 @@ from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
-from librarian.service.blob_reader.settings import BlobReaderSettings
+from librarian.service.blob_extractor.settings import BlobExtractorSettings
 
 
 class Abstract(BaseModel):
@@ -27,7 +27,7 @@ def build_llm_model(model_string: str, anthropic_api_key: str) -> AnthropicModel
     )
 
 
-def build_abstract_agent(settings: BlobReaderSettings) -> Agent[None, Abstract]:
+def build_abstract_agent(settings: BlobExtractorSettings) -> Agent[None, Abstract]:
     instructions = (
         "You analyze a single blob of content extracted from a larger document "
         "and produce a structured Abstract describing it.\n\n"

@@ -3,7 +3,7 @@ from typing import AsyncIterator
 
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
-from librarian.settings.http_client import HttpClientSettings
+from librarian.common.settings.http_client import HttpClientSettings
 
 
 @asynccontextmanager

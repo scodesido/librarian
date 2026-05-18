@@ -9,15 +9,15 @@ from librarian.api.core.auth.user import CurrentUser
 from librarian.api.db import DbConnection
 from librarian.api.http import HttpClient
 from librarian.api.settings import settings
-from librarian.db.tables.auth_google import AuthGoogle
-from librarian.db.tables.auth_sessions import AuthSessions
-from librarian.db.tables.users import Users
-from librarian.oauth.google.crypto import encrypt as encrypt_google_token
-from librarian.oauth.google.tokens import (
+from librarian.common.oauth.google.crypto import encrypt as encrypt_google_token
+from librarian.common.oauth.google.tokens import (
     build_authorize_url,
     exchange_code,
     fetch_user_info,
 )
+from librarian.db.tables.auth_google import AuthGoogle
+from librarian.db.tables.auth_sessions import AuthSessions
+from librarian.db.tables.users import Users
 
 router = APIRouter(prefix="/oauth/google")
 

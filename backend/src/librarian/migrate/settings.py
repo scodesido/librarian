@@ -1,5 +1,5 @@
-from librarian.settings.base import YamlSettings
-from librarian.settings.postgres import PostgresSettings
+from librarian.common.settings.base import YamlSettings
+from librarian.common.settings.postgres import PostgresSettings
 
 
 class Settings(YamlSettings):

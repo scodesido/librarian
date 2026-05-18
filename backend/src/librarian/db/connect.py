@@ -5,7 +5,7 @@ from typing import AsyncIterator
 from asyncpg import Connection, Pool, create_pool
 from pgvector.asyncpg import register_vector
 
-from librarian.settings.postgres import PostgresSettings
+from librarian.common.settings.postgres import PostgresSettings
 
 
 async def init_connection(conn: Connection) -> None:

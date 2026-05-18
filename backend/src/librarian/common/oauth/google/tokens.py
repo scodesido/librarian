@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 from aiohttp import ClientSession
 from pydantic import BaseModel
 
-from librarian.settings.google_oauth import GoogleOAuthSettings
+from librarian.common.settings.google_oauth import GoogleOAuthSettings
 
 
 class TokenResponse(BaseModel):

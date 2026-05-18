@@ -4,7 +4,9 @@ from asyncio import run as asyncio_run
 
 from watchfiles import run_process as watch_process
 
-from librarian.service.blob_reader.worker import run_worker as run_blob_reader_worker
+from librarian.service.blob_extractor.worker import (
+    run_worker as run_blob_extractor_worker,
+)
 from librarian.service.logging import configure_logging
 from librarian.service.settings import settings
 
@@ -16,7 +18,7 @@ async def run_workers_async() -> None:
 
     service_selection: list[str] | None = args.service
     service_workers = {
-        "blob-reader": run_blob_reader_worker,
+        "blob-extractor": run_blob_extractor_worker,
     }
     if service_selection is not None and len(service_selection) > 0:
         service_workers = {

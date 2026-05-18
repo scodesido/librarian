@@ -1,33 +1,58 @@
 from datetime import datetime
+from typing import Any
+
+import numpy as np
+from numpy.typing import NDArray
 
 from librarian.db.table import Table, TableModel
 
 
 class DataBlobsModel(TableModel):
     blob_id: int
+    user_id: int
     file_id: int
-    start: int
-    end: int
+    file_blob_index: int
+    file_start: int
+    file_end: int
+    is_final_blob: bool
+    next_blob_id: int | None
+    abstract: dict[str, Any]
     created_at: datetime
-    updated_at: datetime
 
 
 class DataBlobs(Table):
-    async def create(self, file_id: int, start: int, end: int) -> int:
+    async def insert_one(
+        self,
+        user_id: int,
+        file_id: int,
+        file_blob_index: int,
+        file_start: int,
+        file_end: int,
+        is_final_blob: bool,
+        next_blob_id: int | None,
+        embedding_blob: NDArray[np.float32],
+        embedding_with_file: NDArray[np.float32],
+        abstract: dict[str, Any],
+    ) -> int:
         blob_id: int = await self.conn.fetchval(
             (
-                'INSERT INTO data_blobs (file_id, "start", "end") '
-                "VALUES ($1, $2, $3) RETURNING blob_id"
+                "INSERT INTO data_blobs ("
+                "  user_id, file_id, file_blob_index, file_start, file_end,"
+                "  is_final_blob, next_blob_id,"
+                "  embedding_blob, embedding_with_file, abstract"
+                ") VALUES ("
+                "  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10"
+                ") RETURNING blob_id"
             ),
+            user_id,
             file_id,
-            start,
-            end,
+            file_blob_index,
+            file_start,
+            file_end,
+            is_final_blob,
+            next_blob_id,
+            embedding_blob,
+            embedding_with_file,
+            abstract,
         )
         return blob_id
-
-    async def delete_for_file(self, file_id: int) -> int:
-        result: str = await self.conn.execute(
-            "DELETE FROM data_blobs WHERE file_id = $1",
-            file_id,
-        )
-        return int(result.rsplit(" ", 1)[-1])

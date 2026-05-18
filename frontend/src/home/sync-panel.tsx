@@ -2,6 +2,12 @@ import { useEffect, useState } from "react";
 import { Button, Group, Progress, Stack, Text, TextInput } from "@mantine/core";
 import { api } from "../api/client";
 
+// TODO: update to the new /data/files/pipeline-counts/stream endpoint. The
+// backend now returns a richer PipelineCounts payload
+// ({files_total, files_ready, blobs_total, blobs_in_tree, nodes_total,
+//   nodes_weighted, nodes_abstracted}). The bits below still reference the
+// retired StateCounts shape and the retired /state-counts/stream URL; the
+// stream connection will currently 404.
 interface StateCounts {
   pending: number;
   ready: number;

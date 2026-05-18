@@ -5,7 +5,7 @@ from aiohttp import ClientSession
 from fastapi import Depends, FastAPI, Request
 
 from librarian.api.settings import settings
-from librarian.http.client import open_client_session
+from librarian.common.http.client import open_client_session
 
 
 @asynccontextmanager
