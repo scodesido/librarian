@@ -1,25 +1,36 @@
 import numpy as np
+from aiohttp import ClientSession
 from numpy.typing import NDArray
-from pydantic_ai import Embedder
-from pydantic_ai.embeddings.voyageai import VoyageAIEmbeddingModel
-from pydantic_ai.providers.voyageai import VoyageAIProvider
 
 from librarian.service.abstract import RollingAbstract
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
+from librarian.service.embedder import Embedder, OllamaEmbedder, VoyageEmbedder
 
 
 def build_embedder(settings: BlobExtractorSettings) -> Embedder:
+    """Dispatch on the "<provider>:<model>" prefix in
+    settings.embedding_model. Two providers are currently wired up:
+    `ollama` (local daemon) and `voyageai` (hosted). Adding a new
+    provider is a new branch here plus a small class in
+    `service/embedder.py`.
+    """
     provider_name, model_name = settings.embedding_model.split(":", 1)
-    if provider_name != "voyageai":
-        raise ValueError(
-            f"Unsupported embedding provider '{provider_name}'. "
-            "Only 'voyageai' is wired up; extend build_embedder to add more."
+    if provider_name == "ollama":
+        return OllamaEmbedder(
+            host=settings.ollama_host,
+            model=model_name,
+            dimensions=settings.embedding_dimensions,
         )
-    model = VoyageAIEmbeddingModel(
-        model_name,
-        provider=VoyageAIProvider(api_key=settings.get_voyage_api_key),
+    if provider_name == "voyageai":
+        return VoyageEmbedder(
+            api_key=settings.get_voyage_api_key,
+            model=model_name,
+            dimensions=settings.embedding_dimensions,
+        )
+    raise ValueError(
+        f"Unsupported embedding provider '{provider_name}'. "
+        "Wire it up in service/embedder.py and add a branch in build_embedder."
     )
-    return Embedder(model)
 
 
 def serialize_abstract_for_embed(abstract: RollingAbstract) -> str:
@@ -40,6 +51,7 @@ def normalize_l2(vec: NDArray[np.float32]) -> NDArray[np.float32]:
 
 
 async def embed_blobs(
+    http: ClientSession,
     embedder: Embedder,
     raw_texts: list[str],
     abstracts: list[RollingAbstract],
@@ -58,10 +70,8 @@ async def embed_blobs(
         f"{raw}\n\n{serialize_abstract_for_embed(abstract)}"
         for raw, abstract in zip(raw_texts, abstracts, strict=True)
     ]
-    result = await embedder.embed_documents(inputs)
-    return [
-        normalize_l2(np.asarray(vec, dtype=np.float32)) for vec in result.embeddings
-    ]
+    embeddings = await embedder.embed_documents(http, inputs)
+    return [normalize_l2(e) for e in embeddings]
 
 
 def compute_with_file_embeddings(

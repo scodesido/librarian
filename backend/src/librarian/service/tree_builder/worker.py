@@ -50,20 +50,21 @@ async def run_one_iteration(pool: Pool) -> bool:
             await conn.execute("SELECT pg_advisory_xact_lock($1)", user_id)
 
             if await backfill_one_weight(conn, user_id):
-                logger.debug("tree_builder: backfilled one weight (user %s)", user_id)
+                logger.info("tree_builder: backfilled one weight (user %s)", user_id)
                 return True
             if await split_one_overfull(
                 conn, user_id, s.max_children_per_node, s.imbalance_alpha
             ):
-                logger.debug("tree_builder: split one over-K node (user %s)", user_id)
+                logger.info("tree_builder: split one over-K node (user %s)", user_id)
                 return True
             if await insert_one_ready_file(conn, user_id, s.imbalance_alpha):
-                logger.debug("tree_builder: inserted one ready file (user %s)", user_id)
+                logger.info("tree_builder: inserted one ready file (user %s)", user_id)
                 return True
     return False
 
 
 async def run_worker() -> None:
     s = settings.tree_builder
+    logger.info("tree_builder: starting %d worker(s)", s.concurrent_workers)
     async with open_pool(settings.database) as pool:
         await asyncio.gather(*(worker_loop(pool) for _ in range(s.concurrent_workers)))

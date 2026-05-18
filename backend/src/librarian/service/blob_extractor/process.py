@@ -1,8 +1,9 @@
+import logging
 from dataclasses import dataclass
 
 from aiohttp import ClientSession
 from asyncpg.pool import PoolConnectionProxy
-from pydantic_ai import Agent, Embedder
+from pydantic_ai import Agent
 
 from librarian.common.oauth.google.crypto import decrypt as decrypt_google_token
 from librarian.common.oauth.google.tokens import refresh_access_token
@@ -23,6 +24,9 @@ from librarian.service.blob_extractor.insert import (
 )
 from librarian.service.blob_extractor.pdf_text import extract_pdf_text
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
+from librarian.service.embedder import Embedder
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessFileError(Exception):
@@ -113,14 +117,23 @@ async def process_file(
 
     abstracts: list[RollingAbstract] = []
     previous_running: str | None = None
-    for chunk in chunks:
+    n_chunks = len(chunks)
+    for i, chunk in enumerate(chunks):
         abstract = await extract_abstract(
             agent, chunk.llm_content, chunk.llm_media_type, previous_running
         )
         abstracts.append(abstract)
         previous_running = abstract.running_summary
+        logger.info(
+            "blob_extractor: file %s blob %d/%d abstracted: topics=%s",
+            file.file_id,
+            i + 1,
+            n_chunks,
+            abstract.topics,
+        )
 
     embedding_blobs = await embed_blobs(
+        http,
         embedder,
         raw_texts=[c.raw_text for c in chunks],
         abstracts=abstracts,

@@ -53,6 +53,7 @@ async def run_one_iteration(pool: Pool, agent: Agent[None, Abstract]) -> bool:
 async def run_worker() -> None:
     s = settings.node_extractor
     agent = build_node_abstract_agent(s)
+    logger.info("node_extractor: starting %d worker(s)", s.concurrent_workers)
     async with open_pool(settings.database) as pool:
         await asyncio.gather(
             *(worker_loop(pool, agent) for _ in range(s.concurrent_workers))

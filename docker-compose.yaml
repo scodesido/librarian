@@ -1,36 +1,38 @@
 services:
-  # librarian-api:
-  #   hostname: librarian-api
-  #   container_name: librarian-api
-  #   image: librarian-api:latest
-  #   build:
-  #     context: ./backend
-  #   ports:
-  #     - 127.0.0.1:8000:8000
-  #   volumes:
-  #     - ./backend/src:/app/src
-  #     - ./backend/db:/app/db
-  #     - ./dev-config/api/settings.yaml:/app/config/settings.yaml:ro
-  #   env_file: .env
-    # depends_on:
-    #   librarian-migrate:
-    #     condition: service_completed_successfully
+  librarian-api:
+    hostname: librarian-api
+    container_name: librarian-api
+    image: librarian-api:latest
+    build:
+      context: ./backend
+    ports:
+      - 127.0.0.1:8000:8000
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/db:/app/db
+      - ./dev-config/api/settings.yaml:/app/config/settings.yaml:ro
+    env_file: .env
+    depends_on:
+      librarian-migrate:
+        condition: service_completed_successfully
 
-  # librarian-service:
-  #   hostname: librarian-service
-  #   container_name: librarian-service
-  #   image: librarian-service:latest
-  #   build:
-  #     context: ./backend
-  #   entrypoint: [run-service]
-  #   volumes:
-  #     - ./backend/src:/app/src
-  #     - ./backend/db:/app/db
-  #     - ./dev-config/service/settings.yaml:/app/config/settings.yaml:ro
-  #   env_file: .env
-    # depends_on:
-    #   librarian-migrate:
-    #     condition: service_completed_successfully
+  librarian-service:
+    hostname: librarian-service
+    container_name: librarian-service
+    image: librarian-service:latest
+    build:
+      context: ./backend
+    entrypoint: [run-service]
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/db:/app/db
+      - ./dev-config/service/settings.yaml:/app/config/settings.yaml:ro
+    env_file: .env
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      librarian-migrate:
+        condition: service_completed_successfully
 
   librarian-web:
     hostname: librarian-web

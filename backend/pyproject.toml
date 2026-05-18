@@ -19,7 +19,6 @@ dependencies = [
     "pypdf>=6.10.2",
     "pyyaml>=6.0.3",
     "uvicorn>=0.46.0",
-    "voyageai>=0.3.7; python_version < '3.14'",
     "watchfiles>=1.1.1",
 ]
 

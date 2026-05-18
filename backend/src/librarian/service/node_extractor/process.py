@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from asyncpg.pool import PoolConnectionProxy
@@ -6,6 +7,8 @@ from pydantic_ai import Agent
 from librarian.db.tables.data_node_abstracts import DataNodeAbstracts
 from librarian.service.abstract import Abstract
 from librarian.service.node_extractor.abstract import extract_node_abstract
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessNodeError(Exception):
@@ -103,6 +106,14 @@ async def process_one_node(
             f"node {node_id} has no children at extraction time; the candidate "
             "query should have excluded it"
         )
+    logger.info(
+        "node_extractor: extracting node %s (user %s, height %s, %d children)",
+        node_id,
+        user_id,
+        height,
+        len(children),
+    )
     abstract = await extract_node_abstract(agent, children)
     await DataNodeAbstracts(conn).insert(user_id, node_id, abstract.model_dump())
+    logger.info("node_extractor: node %s done", node_id)
     return True

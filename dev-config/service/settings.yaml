@@ -8,11 +8,18 @@ database:
   port: 5432
   name: librarian
 
+google_oauth:
+  token_encryption_key: 6DERvXJRIJQChZY06cGR1A0Aj8o0CS0zh40H7wtv-kU=
+
+blob_extractor:
+  ollama_host: http://host.docker.internal:11434
+
 # google_oauth.client_id, .client_secret and .token_encryption_key are
 # expected via env (LIBRARIAN__GOOGLE_OAUTH__CLIENT_ID, _CLIENT_SECRET,
 # _TOKEN_ENCRYPTION_KEY) — typically loaded from a local .env file. The
 # LLM/embedding API keys are per-worker; for the same model provider you
 # can set the same value across each worker's slot:
 #   LIBRARIAN__BLOB_EXTRACTOR__ANTHROPIC_API_KEY
-#   LIBRARIAN__BLOB_EXTRACTOR__VOYAGE_API_KEY
+#   LIBRARIAN__BLOB_EXTRACTOR__VOYAGE_API_KEY (only if embedding_model
+#       is set to a "voyageai:..." string; ollama is the default)
 #   LIBRARIAN__NODE_EXTRACTOR__ANTHROPIC_API_KEY

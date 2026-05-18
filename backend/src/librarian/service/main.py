@@ -1,3 +1,4 @@
+import logging
 from argparse import ArgumentParser
 from asyncio import CancelledError, gather
 from asyncio import run as asyncio_run
@@ -16,6 +17,8 @@ from librarian.service.tree_builder.worker import (
     run_worker as run_tree_builder_worker,
 )
 
+logger = logging.getLogger(__name__)
+
 
 async def run_workers_async() -> None:
     arg_parser = ArgumentParser()
@@ -32,6 +35,7 @@ async def run_workers_async() -> None:
         service_workers = {
             k: v for k, v in service_workers.items() if k in service_selection
         }
+    logger.info("service: starting workers %s", sorted(service_workers))
     try:
         await gather(*[worker() for worker in service_workers.values()])
     except CancelledError:
