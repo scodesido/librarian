@@ -1,33 +1,13 @@
-from pydantic import BaseModel
 from pydantic_ai import Agent, BinaryContent
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.providers.anthropic import AnthropicProvider
 
+from librarian.service.abstract import RollingAbstract
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
+from librarian.service.llm import build_llm_model
 
 
-class Abstract(BaseModel):
-    summary: str
-    topics: list[str]
-    intended_audience: str
-    content_type: list[str]
-    domains: list[str]
-    running_summary: str
-
-
-def build_llm_model(model_string: str, anthropic_api_key: str) -> AnthropicModel:
-    provider_name, model_name = model_string.split(":", 1)
-    if provider_name != "anthropic":
-        raise ValueError(
-            f"Unsupported LLM provider '{provider_name}'. "
-            "Only 'anthropic' is wired up; extend build_llm_model to add more."
-        )
-    return AnthropicModel(
-        model_name, provider=AnthropicProvider(api_key=anthropic_api_key)
-    )
-
-
-def build_abstract_agent(settings: BlobExtractorSettings) -> Agent[None, Abstract]:
+def build_abstract_agent(
+    settings: BlobExtractorSettings,
+) -> Agent[None, RollingAbstract]:
     instructions = (
         "You analyze a single blob of content extracted from a larger document "
         "and produce a structured Abstract describing it.\n\n"
@@ -49,15 +29,15 @@ def build_abstract_agent(settings: BlobExtractorSettings) -> Agent[None, Abstrac
         "this first blob alone."
     )
     model = build_llm_model(settings.llm_model, settings.get_anthropic_api_key)
-    return Agent(model, output_type=Abstract, instructions=instructions)
+    return Agent(model, output_type=RollingAbstract, instructions=instructions)
 
 
 async def extract_abstract(
-    agent: Agent[None, Abstract],
+    agent: Agent[None, RollingAbstract],
     content: bytes | str,
     media_type: str,
     previous_running_summary: str | None,
-) -> Abstract:
+) -> RollingAbstract:
     parts: list[str | BinaryContent] = []
     if previous_running_summary is None:
         parts.append(

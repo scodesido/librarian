@@ -4,7 +4,7 @@ from pydantic_ai import Embedder
 from pydantic_ai.embeddings.voyageai import VoyageAIEmbeddingModel
 from pydantic_ai.providers.voyageai import VoyageAIProvider
 
-from librarian.service.blob_extractor.abstract import Abstract
+from librarian.service.abstract import RollingAbstract
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
 
 
@@ -22,8 +22,8 @@ def build_embedder(settings: BlobExtractorSettings) -> Embedder:
     return Embedder(model)
 
 
-def serialize_abstract_for_embed(abstract: Abstract) -> str:
-    """Compose the Abstract fields that carry semantic prose into a single
+def serialize_abstract_for_embed(abstract: RollingAbstract) -> str:
+    """Compose the RollingAbstract fields that carry semantic prose into a single
     string. The categorical fields (intended_audience, content_type, domains)
     are short labels and not included; they're more useful as JSONB filters.
     """
@@ -42,7 +42,7 @@ def normalize_l2(vec: NDArray[np.float32]) -> NDArray[np.float32]:
 async def embed_blobs(
     embedder: Embedder,
     raw_texts: list[str],
-    abstracts: list[Abstract],
+    abstracts: list[RollingAbstract],
 ) -> list[NDArray[np.float32]]:
     """One batched call; returns one L2-unit vector per (raw_text, abstract).
     The embedder input is `raw_text + "\\n\\n" + serialize_abstract_for_embed`.

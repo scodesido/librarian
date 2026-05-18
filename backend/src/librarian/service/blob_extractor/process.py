@@ -9,7 +9,8 @@ from librarian.common.oauth.google.tokens import refresh_access_token
 from librarian.common.settings.google_oauth import GoogleOAuthSettings
 from librarian.db.tables.auth_google import AuthGoogle
 from librarian.db.tables.data_files import DataFilesModel
-from librarian.service.blob_extractor.abstract import Abstract, extract_abstract
+from librarian.service.abstract import RollingAbstract
+from librarian.service.blob_extractor.abstract import extract_abstract
 from librarian.service.blob_extractor.chunk import chunk_pdf, chunk_text
 from librarian.service.blob_extractor.drive import download_file
 from librarian.service.blob_extractor.embed import (
@@ -68,7 +69,7 @@ async def process_file(
     file: DataFilesModel,
     conn: PoolConnectionProxy,
     http: ClientSession,
-    agent: Agent[None, Abstract],
+    agent: Agent[None, RollingAbstract],
     embedder: Embedder,
     settings: BlobExtractorSettings,
     google_oauth_settings: GoogleOAuthSettings,
@@ -110,7 +111,7 @@ async def process_file(
             "final blob and so the file would never become ready"
         )
 
-    abstracts: list[Abstract] = []
+    abstracts: list[RollingAbstract] = []
     previous_running: str | None = None
     for chunk in chunks:
         abstract = await extract_abstract(

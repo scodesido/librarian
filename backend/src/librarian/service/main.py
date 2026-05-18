@@ -8,7 +8,13 @@ from librarian.service.blob_extractor.worker import (
     run_worker as run_blob_extractor_worker,
 )
 from librarian.service.logging import configure_logging
+from librarian.service.node_extractor.worker import (
+    run_worker as run_node_extractor_worker,
+)
 from librarian.service.settings import settings
+from librarian.service.tree_builder.worker import (
+    run_worker as run_tree_builder_worker,
+)
 
 
 async def run_workers_async() -> None:
@@ -19,6 +25,8 @@ async def run_workers_async() -> None:
     service_selection: list[str] | None = args.service
     service_workers = {
         "blob-extractor": run_blob_extractor_worker,
+        "tree-builder": run_tree_builder_worker,
+        "node-extractor": run_node_extractor_worker,
     }
     if service_selection is not None and len(service_selection) > 0:
         service_workers = {

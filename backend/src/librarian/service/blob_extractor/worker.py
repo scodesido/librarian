@@ -8,11 +8,9 @@ from pydantic_ai import Agent, Embedder
 from librarian.common.http.client import open_client_session
 from librarian.db.connect import open_pool
 from librarian.db.readiness import claim_next_unready_file
+from librarian.service.abstract import RollingAbstract
 from librarian.service.backoff import ExponentialBackoff
-from librarian.service.blob_extractor.abstract import (
-    Abstract,
-    build_abstract_agent,
-)
+from librarian.service.blob_extractor.abstract import build_abstract_agent
 from librarian.service.blob_extractor.embed import build_embedder
 from librarian.service.blob_extractor.process import process_file
 from librarian.service.settings import settings
@@ -23,7 +21,7 @@ logger = logging.getLogger(__name__)
 async def worker_loop(
     pool: Pool,
     http: ClientSession,
-    agent: Agent[None, Abstract],
+    agent: Agent[None, RollingAbstract],
     embedder: Embedder,
 ) -> None:
     s = settings.blob_extractor
@@ -46,7 +44,7 @@ async def worker_loop(
 async def run_one_iteration(
     pool: Pool,
     http: ClientSession,
-    agent: Agent[None, Abstract],
+    agent: Agent[None, RollingAbstract],
     embedder: Embedder,
 ) -> bool:
     """One file's worth of work, atomically. Returns True iff a file was
