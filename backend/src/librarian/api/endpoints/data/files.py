@@ -5,17 +5,18 @@ from typing import Any, AsyncIterator
 from aiohttp import ClientSession
 from asyncpg import Pool
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from librarian.api.core.auth.user import CurrentUser
 from librarian.api.db import DbConnection
 from librarian.api.http import HttpClient
 from librarian.api.settings import settings
-from librarian.common.oauth.google.crypto import decrypt as decrypt_google_token
-from librarian.common.oauth.google.tokens import refresh_access_token
+from librarian.common.oauth.google.access import (
+    NoGoogleAuthError,
+    access_token_for_user,
+)
 from librarian.db.readiness import count_user_pipeline
-from librarian.db.tables.auth_google import AuthGoogle
 from librarian.db.tables.data_files import DataFiles, FileType
 
 DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
@@ -172,16 +173,14 @@ async def sync(
     http: HttpClient,
     body: SyncRequest,
 ) -> SyncResponse:
-    auth = await AuthGoogle(conn).for_user(user_id)
-    if auth is None:
-        raise HTTPException(status_code=401, detail="User not connected to Google")
-
-    refresh_token = decrypt_google_token(
-        settings.google_oauth.get_token_encryption_key, auth.refresh_token_enc
-    )
-    access_token = await refresh_access_token(
-        http, settings.google_oauth, refresh_token
-    )
+    try:
+        access_token = await access_token_for_user(
+            conn, http, settings.google_oauth, user_id
+        )
+    except NoGoogleAuthError as exc:
+        raise HTTPException(
+            status_code=401, detail="User not connected to Google"
+        ) from exc
     items = await list_drive_files(http, access_token, body.prefix)
     if not items:
         raise HTTPException(
@@ -194,6 +193,39 @@ async def sync(
         added = await files.insert_missing(user_id, "GDRIVE", items)
         removed = await files.delete_missing(user_id, "GDRIVE", paths)
     return SyncResponse(added=added, removed=removed)
+
+
+@router.post("/rebuild-tree", status_code=204)
+async def rebuild_tree(user_id: CurrentUser, conn: DbConnection) -> Response:
+    """Drop every blob_edge for the user. The deferred orphan-collection
+    trigger then walks the cascade up through data_nodes, collapsing the
+    entire tree by commit time. Files and blobs are untouched, so the
+    tree_builder/node_extractor workers rebuild from the existing blobs on
+    their next poll.
+    """
+    async with conn.transaction():
+        await conn.execute("DELETE FROM data_blob_edges WHERE user_id = $1", user_id)
+    return Response(status_code=204)
+
+
+@router.post("/clear", status_code=204)
+async def clear(user_id: CurrentUser, conn: DbConnection) -> Response:
+    """Drop every data_files row for the user. FK cascades remove
+    data_blobs, data_blob_edges, and (via the orphan trigger) the whole
+    tree. After this the library is empty; the user must POST /sync
+    again to repopulate.
+
+    Destructive: this discards all extracted blobs and LLM-generated
+    abstracts. The caller is expected to confirm with the user.
+
+    Named `/clear` rather than `/resync` because it does not, on its
+    own, fetch anything from Drive — it only clears. Pairing a clear
+    with a subsequent sync is left to the caller (typically the FE
+    showing a "Hard re-sync" flow that POSTs both in sequence).
+    """
+    async with conn.transaction():
+        await conn.execute("DELETE FROM data_files WHERE user_id = $1", user_id)
+    return Response(status_code=204)
 
 
 async def pipeline_counts_events(

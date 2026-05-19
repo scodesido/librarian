@@ -1,14 +1,15 @@
 import {
   Button,
   Container,
-  Divider,
   Group,
   Stack,
+  Tabs,
   Text,
   Title,
 } from "@mantine/core";
 import { api } from "../api/client";
 import type { Me } from "../auth/use-auth";
+import SearchPanel from "./search-panel";
 import SyncPanel from "./sync-panel";
 import TreeExplorer from "./tree-explorer";
 
@@ -23,10 +24,10 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
     onLoggedOut();
   };
 
-  // SyncPanel and TreeExplorer are deliberately independent: each owns its
-  // own data, error, and connection state. Promoting either into its own
-  // tab later means lifting one component out and wrapping the parent in
-  // <Tabs>, no internal refactor needed.
+  // Tabs keep their panels mounted by default, so each tab's state persists
+  // when the user switches away and back: an in-progress search isn't lost
+  // when the user peeks at the tree, the pipeline SSE stream stays open
+  // across tab switches, etc.
   return (
     <Container py="lg">
       <Stack gap="lg">
@@ -43,9 +44,22 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
             </Button>
           </Group>
         </Group>
-        <SyncPanel />
-        <Divider />
-        <TreeExplorer />
+        <Tabs defaultValue="sync">
+          <Tabs.List>
+            <Tabs.Tab value="sync">Sync</Tabs.Tab>
+            <Tabs.Tab value="tree">Tree</Tabs.Tab>
+            <Tabs.Tab value="search">Search</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="sync" pt="md">
+            <SyncPanel />
+          </Tabs.Panel>
+          <Tabs.Panel value="tree" pt="md">
+            <TreeExplorer />
+          </Tabs.Panel>
+          <Tabs.Panel value="search" pt="md">
+            <SearchPanel />
+          </Tabs.Panel>
+        </Tabs>
       </Stack>
     </Container>
   );

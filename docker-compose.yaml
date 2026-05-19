@@ -37,16 +37,15 @@ services:
   librarian-ollama:
     hostname: librarian-ollama
     container_name: librarian-ollama
-    image: ollama/ollama:latest
-    entrypoint: ["/bin/sh", "/init.sh"]
-    volumes:
-      - ./dev-config/ollama/init.sh:/init.sh:ro
-      - ./.container_data/ollama:/root/.ollama
+    image: librarian-ollama:latest
+    build:
+      context: ./ollama
+      dockerfile: dockerfile
     healthcheck:
       test: ["CMD-SHELL", "ollama list > /dev/null"]
-      start_period: 120s
+      start_period: 30s
       start_interval: 1s
-      interval: 5s
+      interval: 60s
       timeout: 1s
       retries: 5
 

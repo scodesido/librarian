@@ -5,10 +5,11 @@ from aiohttp import ClientSession
 from asyncpg.pool import PoolConnectionProxy
 from pydantic_ai import Agent, BinaryContent
 
-from librarian.common.oauth.google.crypto import decrypt as decrypt_google_token
-from librarian.common.oauth.google.tokens import refresh_access_token
+from librarian.common.oauth.google.access import (
+    NoGoogleAuthError,
+    access_token_for_user,
+)
 from librarian.common.settings.google_oauth import GoogleOAuthSettings
-from librarian.db.tables.auth_google import AuthGoogle
 from librarian.db.tables.data_files import DataFilesModel
 from librarian.service.abstract import RollingAbstract
 from librarian.service.blob_extractor.abstract import extract_abstract
@@ -126,16 +127,12 @@ async def process_file(
     (see docs/05.blob_extractor.md): atomicity of the file's blob set is
     worth the long lease on the connection.
     """
-    auth = await AuthGoogle(conn).for_user(file.user_id)
-    if auth is None:
-        raise ProcessFileError(f"user {file.user_id} has no google auth")
-
-    refresh_token = decrypt_google_token(
-        google_oauth_settings.get_token_encryption_key, auth.refresh_token_enc
-    )
-    access_token = await refresh_access_token(
-        http, google_oauth_settings, refresh_token
-    )
+    try:
+        access_token = await access_token_for_user(
+            conn, http, google_oauth_settings, file.user_id
+        )
+    except NoGoogleAuthError as exc:
+        raise ProcessFileError(str(exc)) from exc
     file_bytes = await download_file(http, access_token, file.path)
 
     if file.type == "PDF":

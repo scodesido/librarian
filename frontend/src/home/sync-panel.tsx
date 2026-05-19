@@ -53,7 +53,10 @@ function SyncPanel() {
     () => localStorage.getItem(PREFIX_STORAGE_KEY) ?? PREFIX_DEFAULT,
   );
   const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    "sync" | "rebuild" | "clear" | null
+  >(null);
 
   useEffect(() => {
     const url = `${API_URL}/data/files/pipeline-counts/stream`;
@@ -73,25 +76,68 @@ function SyncPanel() {
     localStorage.setItem(PREFIX_STORAGE_KEY, value);
   };
 
-  const onSync = async () => {
+  // One generic POST-action helper backs all three buttons. The only
+  // per-action variation is path + (for sync) body, plus the "what is the
+  // request even called" label used in error messages.
+  const runAction = async (
+    action: "sync" | "rebuild" | "clear",
+    path: string,
+    init: RequestInit,
+  ) => {
+    setPendingAction(action);
     setSyncing(true);
-    setSyncError(null);
+    setActionError(null);
     try {
-      const resp = await api("/data/files/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prefix }),
-      });
+      const resp = await api(path, init);
       if (!resp.ok) {
         const detail = await resp
           .json()
           .then((b: { detail?: string }) => b.detail)
           .catch(() => undefined);
-        setSyncError(detail ?? `Sync failed (${resp.status})`);
+        setActionError(detail ?? `${action} failed (${resp.status})`);
       }
     } finally {
       setSyncing(false);
+      setPendingAction(null);
     }
+  };
+
+  const onSync = () =>
+    runAction("sync", "/data/files/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prefix }),
+    });
+
+  const onRebuildTree = () => {
+    // Confirm: this discards every blob_edge, collapses the whole tree, and
+    // the workers re-attach + re-abstract from scratch. Blobs and files are
+    // untouched, so no LLM re-extraction at the blob level.
+    if (
+      !window.confirm(
+        "Rebuild the tree from scratch? Files and blobs are kept, but the " +
+          "current tree structure and node abstracts are discarded; the " +
+          "workers will reconstruct them. This may take a while.",
+      )
+    )
+      return;
+    runAction("rebuild", "/data/files/rebuild-tree", { method: "POST" });
+  };
+
+  const onClear = () => {
+    // Confirm loudly: this is the truly destructive option — every
+    // file's blobs and abstracts are deleted, so the LLM work for the
+    // blob layer also gets redone next time the user syncs.
+    if (
+      !window.confirm(
+        "Clear library: delete ALL synced files, blobs, abstracts, and " +
+          "the entire tree for your account? Press Sync from Drive after " +
+          "this to repopulate. This discards every LLM-generated abstract " +
+          "and cannot be undone.",
+      )
+    )
+      return;
+    runAction("clear", "/data/files/clear", { method: "POST" });
   };
 
   const fullyReady =
@@ -101,7 +147,6 @@ function SyncPanel() {
     counts.blobs_total > 0 &&
     counts.blobs_in_tree === counts.blobs_total &&
     counts.nodes_total > 0 &&
-    counts.nodes_weighted === counts.nodes_total &&
     counts.nodes_abstracted === counts.nodes_total;
 
   return (
@@ -113,8 +158,29 @@ function SyncPanel() {
           onChange={(e) => onPrefixChange(e.currentTarget.value)}
           style={{ flexGrow: 1 }}
         />
-        <Button onClick={onSync} loading={syncing}>
+        <Button onClick={onSync} loading={syncing && pendingAction === "sync"}>
           Sync from Drive
+        </Button>
+      </Group>
+      <Group gap="xs">
+        <Button
+          variant="default"
+          size="xs"
+          onClick={onRebuildTree}
+          loading={syncing && pendingAction === "rebuild"}
+          disabled={syncing && pendingAction !== "rebuild"}
+        >
+          Rebuild tree
+        </Button>
+        <Button
+          variant="default"
+          size="xs"
+          color="red"
+          onClick={onClear}
+          loading={syncing && pendingAction === "clear"}
+          disabled={syncing && pendingAction !== "clear"}
+        >
+          Clear library
         </Button>
       </Group>
       {counts === null ? (
@@ -128,29 +194,24 @@ function SyncPanel() {
             </Badge>
           </Group>
           <StageRow
-            label="Files synced (ready)"
+            label="Files"
             current={counts.files_ready}
             total={counts.files_total}
           />
           <StageRow
-            label="Blobs in tree"
+            label="Blobs"
             current={counts.blobs_in_tree}
             total={counts.blobs_total}
           />
           <StageRow
-            label="Nodes weighted"
-            current={counts.nodes_weighted}
-            total={counts.nodes_total}
-          />
-          <StageRow
-            label="Nodes abstracted"
+            label="Nodes"
             current={counts.nodes_abstracted}
             total={counts.nodes_total}
           />
         </Stack>
       )}
       {streamError !== null && <Text c="red">{streamError}</Text>}
-      {syncError !== null && <Text c="red">{syncError}</Text>}
+      {actionError !== null && <Text c="red">{actionError}</Text>}
     </Stack>
   );
 }

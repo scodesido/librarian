@@ -13,3 +13,14 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
     """
     reader = PdfReader(BytesIO(pdf_bytes))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def extract_pdf_pages_text(pdf_bytes: bytes, start_page: int, end_page: int) -> str:
+    """Extract plain text from the half-open page range [start_page, end_page)
+    of a PDF. Used by retrieval to materialise a blob's content range without
+    re-chunking the file.
+    """
+    reader = PdfReader(BytesIO(pdf_bytes))
+    return "\n".join(
+        reader.pages[i].extract_text() or "" for i in range(start_page, end_page)
+    )

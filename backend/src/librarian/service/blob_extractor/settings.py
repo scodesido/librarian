@@ -36,7 +36,7 @@ class BlobExtractorSettings(BaseModel):
     #   * embedding_model: "ollama:...", "voyageai:..."
     # llm_model: str = "anthropic:claude-haiku-4-5"
     llm_model: str = "ollama:qwen3.5:9b"
-    embedding_model: str = "ollama:qwen3-embedding:8b"
+    embedding_model: str = "ollama:qwen3-embedding:0.6b"
 
     # How PDFs reach the LLM. Three strategies:
     #   * "text":   pypdf-extracted plain text. Works on any model;
