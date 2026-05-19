@@ -283,7 +283,6 @@ CREATE FUNCTION public.data_nodes_drop_if_orphan() RETURNS trigger
 BEGIN
     DELETE FROM data_nodes dn
     WHERE dn.node_id = OLD.parent_node_id
-      AND dn.is_root = FALSE
       AND NOT EXISTS (SELECT 1 FROM data_node_edges
                       WHERE parent_node_id = dn.node_id)
       AND NOT EXISTS (SELECT 1 FROM data_blob_edges
@@ -1270,4 +1269,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('202605180003'),
     ('202605180004'),
     ('202605180005'),
-    ('202605180006');
+    ('202605180006'),
+    ('202605180007');

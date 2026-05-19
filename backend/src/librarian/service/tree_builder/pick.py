@@ -1,16 +1,16 @@
 from asyncpg.pool import PoolConnectionProxy
 
 
-async def pick_user_with_work(conn: PoolConnectionProxy) -> int | None:
+async def pick_user_with_work(conn: PoolConnectionProxy, k: int) -> int | None:
     """Return the user_id of some user with tree_builder work pending, or
     None if everyone is settled.
 
     Work means at least one of:
       * a data_nodes row without a matching data_node_weights row (weight
         backfill pending);
-      * a data_nodes row with more than max_children_per_node children
-        (split pending) -- not checked here because K is a Python-level
-        setting; the worker's run_iteration consults this directly;
+      * a data_nodes row with more than `k` children counting
+        data_node_edges + data_blob_edges where it is the parent (split
+        pending);
       * a data_blobs row whose file is ready (has is_final_blob=TRUE) and
         which lacks a data_blob_edges row (insertion pending).
 
@@ -27,6 +27,15 @@ async def pick_user_with_work(conn: PoolConnectionProxy) -> int | None:
                 SELECT 1 FROM data_node_weights w WHERE w.node_id = n.node_id
             )
             UNION ALL
+            SELECT n.user_id
+            FROM data_nodes n
+            WHERE (
+                (SELECT count(*) FROM data_node_edges
+                 WHERE parent_node_id = n.node_id)
+                + (SELECT count(*) FROM data_blob_edges
+                   WHERE parent_node_id = n.node_id)
+            ) > $1
+            UNION ALL
             SELECT b.user_id
             FROM data_blobs b
             WHERE NOT EXISTS (
@@ -38,7 +47,8 @@ async def pick_user_with_work(conn: PoolConnectionProxy) -> int | None:
             )
         ) AS work
         LIMIT 1
-        """
+        """,
+        k,
     )
     if record is None:
         return None

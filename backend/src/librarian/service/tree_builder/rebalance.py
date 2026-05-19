@@ -172,13 +172,16 @@ async def split_one_overfull(
          vectors.
       4. Greedy-assign all children to one of the two seeds using the
          weighted-distance formula with a running-centroid update.
-      5. Materialise two new nodes N1, N2 at N.height, edges G->N1,
-         G->N2, and edges N1->{group1 children}, N2->{group2 children}.
-      6. Delete N. FK cascades remove its old outgoing edges and its
-         incoming edge from the old grandparent; deferred orphan
-         collection runs at commit. Weight/abstract invalidation triggers
-         fire eagerly during steps 5-6 and will be picked up by the next
-         backfill iteration.
+      5. Materialise two new nodes N1, N2 at N.height and edges
+         G->N1, G->N2.
+      6. Delete N. FK cascades remove its old outgoing edges to its
+         former children and its incoming edge from the old grandparent;
+         deferred orphan-collection runs at commit (no-ops because N is
+         gone and G is now anchored by N1/N2).
+      7. Create the new edges N1->{group1 children}, N2->{group2
+         children}. Done after the delete so the unique constraint on
+         data_blob_edges.child_blob_id is not transiently violated for
+         leaf splits.
     """
     target = await find_overfull_node(conn, user_id, k)
     if target is None:
@@ -216,6 +219,11 @@ async def split_one_overfull(
     await node_edges.create(user_id, grandparent_id, new_a)
     await node_edges.create(user_id, grandparent_id, new_b)
 
+    # Drop N before reattaching its former children: data_blob_edges has
+    # UNIQUE(child_blob_id), so a new N1->blob edge would collide with the
+    # still-existing N->blob edge if we created it first.
+    await nodes.delete(user_id, node_id)
+
     for new_parent, group in ((new_a, group_a), (new_b, group_b)):
         for child in group:
             if child.is_blob:
@@ -223,5 +231,4 @@ async def split_one_overfull(
             else:
                 await node_edges.create(user_id, new_parent, child.child_id)
 
-    await nodes.delete(user_id, node_id)
     return True
