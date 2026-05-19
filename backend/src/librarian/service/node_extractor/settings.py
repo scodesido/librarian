@@ -1,5 +1,7 @@
 from pydantic import BaseModel, SecretStr
 
+from librarian.service.abstract_settings import AbstractSettings
+
 
 class NodeExtractorSettings(BaseModel):
     # Worker loop
@@ -11,9 +13,14 @@ class NodeExtractorSettings(BaseModel):
     error_backoff_max_seconds: float = 300.0
     error_backoff_multiplier: float = 2.0
 
-    # Abstract shape (soft constraints passed to the LLM prompt).
-    summary_words: int = 100
-    topics_count: int = 5
+    # Per-field budgets for the LLM-produced Abstract. Field meanings
+    # live as Field(description=...) on service/abstract.py and reach
+    # the LLM via the JSON schema; AbstractSettings owns the numeric
+    # budgets and renders them into the agent's instructions via
+    # `budgets_text` (node targets the base Abstract — running_summary
+    # doesn't apply). Independent from blob_extractor's instance so
+    # node summaries can be tuned separately (e.g. longer near the root).
+    abstract: AbstractSettings = AbstractSettings()
 
     # Model selection. Provider prefix picks the backend; see
     # librarian/service/llm.py. "anthropic:..." or "ollama:..." supported.

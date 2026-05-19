@@ -8,25 +8,22 @@ from librarian.service.llm import build_llm_model
 def build_abstract_agent(
     settings: BlobExtractorSettings,
 ) -> Agent[None, RollingAbstract]:
+    # Field *meanings* travel via the output schema (Field(description=...)
+    # on RollingAbstract). The instructions add what the schema can't:
+    # task context, per-field budgets rendered by AbstractSettings, and
+    # the explicit-mention rule. `rolling_budgets_text` includes the
+    # running_summary line because the blob agent targets RollingAbstract.
     instructions = (
-        "You analyze a single blob of content extracted from a larger document "
-        "and produce a structured Abstract describing it.\n\n"
-        "Field constraints:\n"
-        f"- summary: roughly {settings.summary_words} words; concise and "
-        "informative.\n"
-        f"- topics: about {settings.topics_count} short topic strings, "
-        "each 1-4 words.\n"
-        "- intended_audience: a short phrase describing who would read this "
-        "content.\n"
-        "- content_type: 1-3 tags from {essay, data, technical doc, law, "
-        "charts, narrative, reference, code, other}.\n"
-        "- domains: ideally one domain (e.g. 'machine learning', "
-        "'constitutional law', 'civil engineering'). For a single blob, "
-        "prefer a single value.\n"
-        f"- running_summary: roughly {settings.running_summary_words} words. "
-        "If a previous running summary is provided, weave the new blob into "
-        "it; otherwise infer what the whole document seems to be about from "
-        "this first blob alone."
+        "You analyze a single blob of content extracted from a larger "
+        "document and produce a structured Abstract describing it. Each "
+        "field's meaning is given in the output schema; the budgets below "
+        "are soft targets for sizing each field.\n\n"
+        "Field budgets:\n"
+        f"{settings.abstract.rolling_budgets_text}\n\n"
+        "For persons, organizations, works, other_entities, and locations, "
+        "include only items that are EXPLICITLY mentioned in this blob's "
+        "content. Leave the list empty if no such items are explicitly "
+        "mentioned — do not invent or infer."
     )
     # Pass both provider knobs unconditionally; build_llm_model picks the
     # one its provider branch needs and raises if it's missing. This lets

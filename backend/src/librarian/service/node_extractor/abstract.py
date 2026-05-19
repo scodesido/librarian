@@ -11,25 +11,28 @@ from librarian.service.node_extractor.settings import NodeExtractorSettings
 def build_node_abstract_agent(
     settings: NodeExtractorSettings,
 ) -> Agent[None, Abstract]:
+    # Field *meanings* travel via the output schema (Field(description=...)
+    # on Abstract). The instructions add what the schema can't: synthesis
+    # task context, per-field budgets rendered by AbstractSettings, and
+    # the rule that entity/location fields must only carry forward items
+    # that appear in the children's Abstracts. `budgets_text` (not
+    # `rolling_budgets_text`) — node targets the base Abstract, no
+    # running_summary at this layer.
     instructions = (
         "You are given a JSON list of children Abstracts. The children come "
-        "from a clustered subtree of a user's document library; your job is "
-        "to synthesize a single Abstract that captures the shared themes, "
-        "content types, audience and domains of the group as a whole.\n\n"
-        "Field constraints:\n"
-        f"- summary: roughly {settings.summary_words} words; a clear synthesis "
-        "of what the whole group is collectively about (not a list of the "
-        "children's summaries).\n"
-        f"- topics: about {settings.topics_count} short topic strings, each "
-        "1-4 words. Prefer topics that appear across multiple children; "
-        "consolidate near-duplicates rather than enumerating every child's "
-        "topics verbatim.\n"
-        "- intended_audience: the audience that would care about this group "
-        "as a whole.\n"
-        "- content_type: 1-3 tags from {essay, data, technical doc, law, "
-        "charts, narrative, reference, code, other} that best describe the "
-        "group.\n"
-        "- domains: one to three domains the group sits in."
+        "from a clustered subtree of a user's document library. Synthesize a "
+        "single Abstract that captures what the whole group is collectively "
+        "about — merge near-duplicates and consolidate themes, do not "
+        "enumerate each child's fields verbatim. Each field's meaning is "
+        "given in the output schema; the budgets below are soft targets "
+        "for sizing each field.\n\n"
+        "Field budgets:\n"
+        f"{settings.abstract.budgets_text}\n\n"
+        "For persons, organizations, works, other_entities, and locations, "
+        "include only items that already appear in the children's Abstracts "
+        "(those have already been filtered to explicit mentions). Pick the "
+        "most representative across the group; leave the list empty if no "
+        "such items appear in the children — do not invent or infer."
     )
     api_key = (
         settings.anthropic_api_key.get_secret_value()

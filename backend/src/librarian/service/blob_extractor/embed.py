@@ -35,12 +35,24 @@ def build_embedder(settings: BlobExtractorSettings) -> Embedder:
 
 def serialize_abstract_for_embed(abstract: RollingAbstract) -> str:
     """Compose the RollingAbstract fields that carry semantic prose into a single
-    string. The categorical fields (intended_audience, content_type, domains)
-    are short labels and not included; they're more useful as JSONB filters.
+    string. The short-label fields (intended_audience, content_type, domains,
+    persons, organizations, works, other_entities, locations, time_period,
+    language) are kept out — they're more useful as JSONB filters than as
+    similarity anchors. Empty list/string fields are skipped so they don't
+    introduce stray separators.
     """
-    return (
-        f"{abstract.summary}\n{', '.join(abstract.topics)}\n{abstract.running_summary}"
-    )
+    parts: list[str] = [
+        abstract.title,
+        abstract.summary,
+        abstract.intended_audience,
+        ", ".join(abstract.topics),
+        ", ".join(abstract.domains),
+        ", ".join(abstract.time_period),
+        "\n".join(abstract.key_questions),
+        "\n".join(abstract.key_claims),
+        abstract.running_summary,
+    ]
+    return "\n".join(p for p in parts if p)
 
 
 def normalize_l2(vec: NDArray[np.float32]) -> NDArray[np.float32]:

@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, SecretStr
 
+from librarian.service.abstract_settings import AbstractSettings
+
 
 class BlobExtractorSettings(BaseModel):
     # Worker loop
@@ -17,10 +19,14 @@ class BlobExtractorSettings(BaseModel):
     pages_per_blob: int = 10
     words_per_blob: int = 2000
 
-    # Abstract shape (passed to the LLM prompt as soft constraints).
-    summary_words: int = 100
-    topics_count: int = 5
-    running_summary_words: int = 80
+    # Per-field budgets for the LLM-produced Abstract. Field meanings
+    # live as Field(description=...) on service/abstract.py and reach
+    # the LLM via the JSON schema; AbstractSettings owns the numeric
+    # budgets and renders them into the agent's instructions via
+    # `rolling_budgets_text` (blob targets RollingAbstract).
+    # Independent from node_extractor's instance so blob and node can
+    # be tuned separately in YAML.
+    abstract: AbstractSettings = AbstractSettings()
 
     # Models. Provider prefix selects the backend:
     #   * LLM: pydantic-ai model string "<provider>:<model>".
