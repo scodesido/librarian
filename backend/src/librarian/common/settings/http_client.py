@@ -9,5 +9,5 @@ class HttpClientSettings(BaseModel):
     # ollama embedding batches (seconds, longer on first call when the
     # model is cold-loaded into VRAM). Tighten it via YAML config if a
     # specific environment wants faster failure on hangs.
-    timeout: float = 300.0
+    timeout: float = 60.0
     pool_size: int = 10

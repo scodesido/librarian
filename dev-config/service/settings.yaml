@@ -26,6 +26,9 @@ node_extractor:
 
   llm_model: anthropic:claude-haiku-4-5
 
+http_client:
+  timeout: 900
+
 # google_oauth.client_id, .client_secret and .token_encryption_key are
 # expected via env (LIBRARIAN__GOOGLE_OAUTH__CLIENT_ID, _CLIENT_SECRET,
 # _TOKEN_ENCRYPTION_KEY) — typically loaded from a local .env file. The
