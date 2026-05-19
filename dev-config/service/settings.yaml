@@ -12,7 +12,7 @@ google_oauth:
   token_encryption_key: 6DERvXJRIJQChZY06cGR1A0Aj8o0CS0zh40H7wtv-kU=
 
 blob_extractor:
-  ollama_host: http://host.docker.internal:11434
+  ollama_host: http://librarian-ollama:11434
   # Bump for more parallelism across files. Each worker pins one pool
   # connection during its long-transaction; default pool max is 10, so
   # there is room to grow further if ollama/Anthropic quotas allow.
@@ -22,7 +22,7 @@ blob_extractor:
   llm_pdf_mode: binary
 
 node_extractor:
-  ollama_host: http://host.docker.internal:11434
+  ollama_host: http://librarian-ollama:11434
 
   llm_model: anthropic:claude-haiku-4-5
 

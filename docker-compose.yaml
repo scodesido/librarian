@@ -28,11 +28,27 @@ services:
       - ./backend/db:/app/db
       - ./dev-config/service/settings.yaml:/app/config/settings.yaml:ro
     env_file: .env
-    extra_hosts:
-      - host.docker.internal:host-gateway
     depends_on:
       librarian-migrate:
         condition: service_completed_successfully
+      librarian-ollama:
+        condition: service_healthy
+
+  librarian-ollama:
+    hostname: librarian-ollama
+    container_name: librarian-ollama
+    image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "/init.sh"]
+    volumes:
+      - ./dev-config/ollama/init.sh:/init.sh:ro
+      - ./.container_data/ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null"]
+      start_period: 120s
+      start_interval: 1s
+      interval: 5s
+      timeout: 1s
+      retries: 5
 
   librarian-web:
     hostname: librarian-web

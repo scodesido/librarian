@@ -137,13 +137,24 @@ async def embed_blobs(
     chunk_chars: int,
     chunk_chars_max: int,
 ) -> list[NDArray[np.float32]]:
-    """Returns one L2-unit vector per (raw_text, abstract).
+    """Returns one L2-unit vector per (raw_text, abstract) pair.
 
-    Each input string `raw + "\\n\\n" + serialize_abstract_for_embed` is
-    split into sub-chunks bounded by `chunk_chars_max`, embedded in one
-    batched call, then mean + L2-normalised within each origin group.
-    Inputs that already fit produce a single sub-chunk, so the reduction
-    is a no-op for them.
+    For each blob the raw text and the serialized abstract are embedded
+    as two independent streams: each stream is split into sub-chunks
+    bounded by `chunk_chars_max` (so we stay under the embedder's
+    context limit), all sub-chunks across both streams and all blobs
+    go through a single batched embedder call, then per-blob per-stream
+    we mean-pool and L2-normalise to get `raw_vec` and `abstract_vec`.
+
+    The blob vector is `normalize(raw_vec + abstract_vec)` when raw
+    text is non-empty (after `.strip()`); when the raw text is empty
+    or whitespace-only — e.g. an image-only PDF chunk where pypdf
+    extracted nothing — the blob vector is just `abstract_vec`, so
+    the embedding doesn't get polluted by a degenerate empty-string
+    encoding. Embedding the abstract as its own stream gives it the
+    same weight as the raw text regardless of raw length, which is
+    the point: the abstract carries the librarian-style classification
+    that node-level rollups reuse.
     """
     if len(raw_texts) != len(abstracts):
         raise ValueError(
@@ -152,24 +163,42 @@ async def embed_blobs(
         )
     if not raw_texts:
         return []
-    inputs = [
-        f"{raw}\n\n{serialize_abstract_for_embed(abstract)}"
-        for raw, abstract in zip(raw_texts, abstracts, strict=True)
-    ]
+    abstract_texts = [serialize_abstract_for_embed(a) for a in abstracts]
+    # Track each sub-chunk's origin as (blob_idx, kind) where kind is
+    # "raw" or "abstract". Empty/whitespace raw streams are skipped so
+    # they don't pollute the average; an empty abstract is treated as
+    # a bug (every blob has a valid Abstract by construction).
     all_chunks: list[str] = []
-    origin_idx: list[int] = []
-    for i, inp in enumerate(inputs):
-        for chunk in chunk_for_embedding(inp, chunk_chars, chunk_chars_max):
-            all_chunks.append(chunk)
-            origin_idx.append(i)
+    origin: list[tuple[int, str]] = []
+    for i, raw in enumerate(raw_texts):
+        if not raw.strip():
+            continue
+        for c in chunk_for_embedding(raw, chunk_chars, chunk_chars_max):
+            all_chunks.append(c)
+            origin.append((i, "raw"))
+    for i, abs_text in enumerate(abstract_texts):
+        if not abs_text:
+            raise ValueError(
+                f"blob {i} produced an empty serialized abstract; the "
+                "abstract is required for the blob embedding"
+            )
+        for c in chunk_for_embedding(abs_text, chunk_chars, chunk_chars_max):
+            all_chunks.append(c)
+            origin.append((i, "abstract"))
     embeddings = await embedder.embed_documents(http, all_chunks)
-    per_input: list[list[NDArray[np.float32]]] = [[] for _ in inputs]
-    for origin, vec in zip(origin_idx, embeddings, strict=True):
-        per_input[origin].append(vec)
-    return [
-        normalize_l2(np.mean(np.stack(group), axis=0).astype(np.float32))
-        for group in per_input
-    ]
+    raw_groups: list[list[NDArray[np.float32]]] = [[] for _ in raw_texts]
+    abs_groups: list[list[NDArray[np.float32]]] = [[] for _ in raw_texts]
+    for (i, kind), vec in zip(origin, embeddings, strict=True):
+        (raw_groups if kind == "raw" else abs_groups)[i].append(vec)
+    result: list[NDArray[np.float32]] = []
+    for raw_g, abs_g in zip(raw_groups, abs_groups, strict=True):
+        abs_vec = normalize_l2(np.mean(np.stack(abs_g), axis=0).astype(np.float32))
+        if not raw_g:
+            result.append(abs_vec)
+            continue
+        raw_vec = normalize_l2(np.mean(np.stack(raw_g), axis=0).astype(np.float32))
+        result.append(normalize_l2((raw_vec + abs_vec).astype(np.float32)))
+    return result
 
 
 def compute_with_file_embeddings(
