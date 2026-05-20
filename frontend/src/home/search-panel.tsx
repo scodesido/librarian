@@ -63,6 +63,12 @@ interface ExpandedNode {
   children: ChildView[];
 }
 
+interface TermsEvent {
+  kind: "terms";
+  effective_search_terms: string;
+  extracted: boolean;
+}
+
 interface ExpandEvent {
   kind: "expand";
   step: number;
@@ -89,11 +95,32 @@ interface ErrorEvent {
   detail: string;
 }
 
-type QueryEvent = ExpandEvent | FetchEvent | DoneEvent | ErrorEvent;
+type QueryEvent =
+  | TermsEvent
+  | ExpandEvent
+  | FetchEvent
+  | DoneEvent
+  | ErrorEvent;
 
 function topicsLine(topics: string[] | undefined): string {
   if (topics === undefined || topics.length === 0) return "(no topics)";
   return topics.join(" · ");
+}
+
+function TermsTimelineItem({ event }: { event: TermsEvent }) {
+  return (
+    <Timeline.Item
+      title={
+        event.extracted
+          ? "Extracted search terms"
+          : "Using provided search terms"
+      }
+    >
+      <Text size="sm" c="dimmed" style={{ fontStyle: "italic" }}>
+        {event.effective_search_terms}
+      </Text>
+    </Timeline.Item>
+  );
 }
 
 function ExpandTimelineItem({ event }: { event: ExpandEvent }) {
@@ -285,7 +312,9 @@ function SearchPanel() {
           <ScrollArea.Autosize mah={280}>
             <Timeline active={events.length} bulletSize={16} lineWidth={2}>
               {events.map((ev, idx) =>
-                ev.kind === "expand" ? (
+                ev.kind === "terms" ? (
+                  <TermsTimelineItem key={idx} event={ev} />
+                ) : ev.kind === "expand" ? (
                   <ExpandTimelineItem key={idx} event={ev} />
                 ) : ev.kind === "fetch" ? (
                   <FetchTimelineItem key={idx} event={ev} />

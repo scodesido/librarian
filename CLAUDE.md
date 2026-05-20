@@ -54,3 +54,10 @@ The goal is for subsequent modifications to the project to have a clear idea of 
 is meant to do, and how the pieces fit together.
 Whenever new changes are proposed, corresponding docs should be added. If changes are decided on an existing
 piece of architecture, of course, the doc of the current workload can still be modified.
+
+# Workflow
+Unless explicitly asked to progress without confirmation, always prepare a plan and explain your choices before implementing.
+Leave room for discussion, and highlight any non-obvious architectural or implementation decisions even when
+there is not really much choice about them.
+
+You can use the `bin/be-type`, `bin/fe-type` and `bin/type` to lint and type the source code.

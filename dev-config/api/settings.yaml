@@ -17,3 +17,6 @@ google_oauth:
   cookie_secure: false
   post_login_redirect: http://localhost:3000/
   token_encryption_key: 6DERvXJRIJQChZY06cGR1A0Aj8o0CS0zh40H7wtv-kU=
+
+query:
+  ollama_host: http://librarian-ollama:11434

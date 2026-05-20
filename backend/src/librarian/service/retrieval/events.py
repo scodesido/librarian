@@ -5,6 +5,24 @@ from pydantic import BaseModel, Field
 from librarian.db.tree_children import ChildView
 
 
+class TermsEvent(BaseModel):
+    """Emitted once at the start of the SSE stream (before the first
+    `expand`). Carries the string we actually embedded for similarity
+    scoring, plus a flag indicating whether it came from an explicit
+    `search_terms` / the question itself (`extracted=False`) or from
+    the pre-flight extraction agent (`extracted=True`).
+
+    The FE renders this immediately so the user can see what we
+    searched for without waiting for `done`. The same string is also
+    echoed on `DoneEvent.effective_search_terms` for non-streaming
+    clients and for stream clients that only consume the final event.
+    """
+
+    kind: Literal["terms"] = "terms"
+    effective_search_terms: str
+    extracted: bool
+
+
 class ExpandEvent(BaseModel):
     """The agent called `expand_nodes` with a batch of node_ids. Carries the
     full result so the FE can render one timeline entry per call.
@@ -32,6 +50,11 @@ class DoneEvent(BaseModel):
     visited_node_ids: list[int]
     steps: int
     rationale: str
+    # The search-terms string actually used to score sibling children.
+    # Mirrors TermsEvent.effective_search_terms — kept on `done` too so
+    # JSON callers and stream clients that only consume the final event
+    # have access to it without having to remember the early event.
+    effective_search_terms: str
 
 
 class ErrorEvent(BaseModel):
@@ -40,7 +63,7 @@ class ErrorEvent(BaseModel):
 
 
 QueryEvent = Annotated[
-    Union[ExpandEvent, FetchEvent, DoneEvent, ErrorEvent],
+    Union[TermsEvent, ExpandEvent, FetchEvent, DoneEvent, ErrorEvent],
     Field(discriminator="kind"),
 ]
 

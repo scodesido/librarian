@@ -2,14 +2,16 @@ import json
 import math
 from typing import Any
 
+import numpy as np
 from asyncpg.pool import PoolConnectionProxy
+from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from librarian.api.settings import QuerySettings
 from librarian.db.tree_children import (
     NodeRow,
-    fetch_children,
+    fetch_children_scored,
     fetch_node_abstract,
 )
 from librarian.service.llm import build_llm_model
@@ -55,20 +57,36 @@ def compute_budget(root_height: int, multiplier: float) -> int:
 
 
 async def build_seed_context(
-    conn: PoolConnectionProxy, user_id: int, root: NodeRow
+    conn: PoolConnectionProxy,
+    user_id: int,
+    root: NodeRow,
+    search_embedding: NDArray[np.float32],
+    effective_search_terms: str,
 ) -> dict[str, Any]:
     """Materialise the seed the agent sees in its instructions: the root's
     own abstract plus the abstracts of the root's immediate children. Same
     shape the tool would return on the first expand_nodes call, but inlined
     into the instructions so the agent doesn't have to spend a step on it
     (and so Anthropic prompt caching covers the seed).
+
+    The root's children are fetched via the scored fetcher so the seed
+    already carries `similarity_score` for each — the agent's first
+    impression sees the same signal it'll see on every subsequent
+    expand_nodes call. `similarity_terms` is also surfaced so the agent
+    can reconcile the score field with the actual text that was embedded
+    (which may differ from the user's question after the pre-flight
+    extraction step). Note that swapping search terms changes the seed
+    JSON and therefore invalidates the Anthropic prompt-cache prefix; a
+    user re-issuing the same question with the same terms still hits the
+    cache.
     """
     abstract = await fetch_node_abstract(conn, user_id, root.node_id)
-    children = await fetch_children(conn, user_id, root)
+    children = await fetch_children_scored(conn, user_id, root, search_embedding)
     return {
         "root_node_id": root.node_id,
         "root_height": root.height,
         "root_abstract": abstract,
+        "similarity_terms": effective_search_terms,
         "root_children": [c.model_dump() for c in children],
     }
 
@@ -94,6 +112,33 @@ def build_instructions(
         "a valid blob id at the same time. The 'n:' / 'b:' prefix is what "
         "tells the tool which one you mean. Always pass `ref` strings "
         "verbatim; never strip the prefix, never construct refs yourself.\n\n"
+        "Similarity scores — advisory:\n"
+        "Every child entry also carries a `similarity_score` field: cosine "
+        "similarity in [-1, 1] between the user's search terms (embedded with "
+        "the same model used to index the library) and the child's stored "
+        "embedding. This is ADDITIONAL INFORMATION FOR CONSIDERATION, not the "
+        "criterion you should optimise. The Abstracts (topics, key_questions, "
+        "key_claims, summary, …) remain the authoritative signal — the score "
+        "is a vector-space hint that can complement them, especially when "
+        "Abstracts are close in topic but worded differently from the user's "
+        "search terms.\n"
+        "Two important constraints on how to read it:\n"
+        "  1. Compare scores ONLY within siblings of the same parent (i.e. "
+        "within one expand_nodes result, among children of the same node). "
+        "Absolute thresholds are not meaningful and scores across different "
+        "parents are not directly comparable — a 0.45 among one parent's "
+        "children may signal a strong match, while a 0.55 among a different "
+        "parent's children may be unremarkable.\n"
+        "  2. Higher is not automatically better. Treat the score as one "
+        "input among many; if the Abstract makes a clearly better case for a "
+        "lower-scoring sibling, prefer the Abstract. The score is most useful "
+        "as a tiebreaker, as a nudge to investigate a candidate the Abstract "
+        "didn't make obvious, or as a reason to revisit a sibling you skipped.\n"
+        "The exact text that was embedded to compute these scores is exposed "
+        "in the seed below as `similarity_terms` — it may have been derived "
+        "from the user's question by a preprocessing step that strips "
+        "conversational framing, so it can differ in phrasing while pointing "
+        "at the same intent.\n\n"
         "Tools you may call:\n"
         f"  * expand_nodes(node_refs): pass up to "
         f"{settings.tool_node_id_max_count} node refs (each starts with 'n:'); "

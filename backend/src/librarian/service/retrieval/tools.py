@@ -8,7 +8,7 @@ from librarian.db.tree_children import (
     InvalidBlobRefError,
     InvalidNodeRefError,
     NodeRow,
-    fetch_children,
+    fetch_children_scored,
     fetch_node_row,
     parse_blob_ref,
     parse_node_ref,
@@ -94,7 +94,9 @@ async def expand_nodes_impl(
 
     expanded: list[ExpandedNode] = []
     for node in nodes:
-        children = await fetch_children(deps.conn, deps.user_id, node)
+        children = await fetch_children_scored(
+            deps.conn, deps.user_id, node, deps.search_embedding
+        )
         expanded.append(ExpandedNode(node_id=node.node_id, children=children))
 
     deps.step_count += 1

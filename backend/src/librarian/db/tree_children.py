@@ -1,6 +1,8 @@
 from typing import Annotated, Any, Literal, Union
 
+import numpy as np
 from asyncpg.pool import PoolConnectionProxy
+from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
 # Prefixed string refs used at the LLM-facing tool boundary so a node_id and
@@ -63,6 +65,12 @@ class NodeChildView(BaseModel):
     height: int
     abstract: dict[str, Any] | None
     blob_count: int | None
+    # Cosine similarity of this child's centroid against the query embedding,
+    # in [-1, 1]. Populated by the *_scored fetchers (retrieval path); None
+    # for the unscored fetchers (tree-explorer path). Advisory only — the
+    # agent is told it's for ranking siblings under one parent, not for
+    # comparing across different parents.
+    similarity_score: float | None = None
 
 
 class BlobChildView(BaseModel):
@@ -74,6 +82,11 @@ class BlobChildView(BaseModel):
     file_blob_index: int
     file_start: int
     file_end: int
+    # See NodeChildView.similarity_score. For blobs the similarity is against
+    # `embedding_blob` (the text-only vector), not `embedding_with_file` —
+    # the file-mixed variant is biased toward grouping same-file blobs and is
+    # better suited to construction than retrieval.
+    similarity_score: float | None = None
 
 
 ChildView = Annotated[Union[NodeChildView, BlobChildView], Field(discriminator="kind")]
@@ -201,4 +214,116 @@ async def fetch_children(
         blobs = await fetch_blob_children(conn, user_id, node.node_id)
         return list(blobs)
     nodes = await fetch_node_children(conn, user_id, node.node_id)
+    return list(nodes)
+
+
+async def fetch_node_children_scored(
+    conn: PoolConnectionProxy,
+    user_id: int,
+    parent_node_id: int,
+    query_embedding: NDArray[np.float32],
+) -> list[NodeChildView]:
+    """Same as fetch_node_children but each child carries a `similarity_score`
+    computed in SQL as cosine similarity (`1 - centroid <=> $3`) between
+    the parent's children's centroids and the user's query vector.
+
+    `LEFT JOIN` on weights means a child without a weight row gets
+    `similarity_score = NULL`; in practice the readiness gate ensures every
+    node has a weight row before the agent is allowed to run, but the
+    defensive None is still in the type.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT c.node_id, c.height, c.created_at,
+               a.abstract,
+               w.blob_count,
+               1 - (w.centroid <=> $3::vector) AS similarity_score
+        FROM data_node_edges e
+        JOIN data_nodes c ON c.node_id = e.child_node_id
+        LEFT JOIN data_node_abstracts a
+          ON a.node_id = c.node_id AND a.user_id = $1
+        LEFT JOIN data_node_weights w
+          ON w.node_id = c.node_id AND w.user_id = $1
+        WHERE e.user_id = $1 AND e.parent_node_id = $2
+        ORDER BY w.blob_count DESC NULLS LAST, c.created_at
+        """,
+        user_id,
+        parent_node_id,
+        query_embedding,
+    )
+    return [
+        NodeChildView(
+            ref=node_ref(r["node_id"]),
+            node_id=r["node_id"],
+            height=r["height"],
+            abstract=r["abstract"],
+            blob_count=r["blob_count"],
+            similarity_score=(
+                None if r["similarity_score"] is None else float(r["similarity_score"])
+            ),
+        )
+        for r in rows
+    ]
+
+
+async def fetch_blob_children_scored(
+    conn: PoolConnectionProxy,
+    user_id: int,
+    parent_node_id: int,
+    query_embedding: NDArray[np.float32],
+) -> list[BlobChildView]:
+    """Same as fetch_blob_children but each child carries a `similarity_score`
+    computed as cosine similarity against `embedding_blob` (NOT
+    `embedding_with_file` — see BlobChildView.similarity_score).
+    """
+    rows = await conn.fetch(
+        """
+        SELECT b.blob_id, b.abstract, b.file_id, b.file_blob_index,
+               b.file_start, b.file_end,
+               1 - (b.embedding_blob <=> $3::vector) AS similarity_score
+        FROM data_blob_edges e
+        JOIN data_blobs b ON b.blob_id = e.child_blob_id
+        WHERE e.user_id = $1 AND e.parent_node_id = $2
+        ORDER BY b.file_id, b.file_blob_index
+        """,
+        user_id,
+        parent_node_id,
+        query_embedding,
+    )
+    return [
+        BlobChildView(
+            ref=blob_ref(r["blob_id"]),
+            blob_id=r["blob_id"],
+            abstract=r["abstract"],
+            file_id=r["file_id"],
+            file_blob_index=r["file_blob_index"],
+            file_start=r["file_start"],
+            file_end=r["file_end"],
+            similarity_score=(
+                None if r["similarity_score"] is None else float(r["similarity_score"])
+            ),
+        )
+        for r in rows
+    ]
+
+
+async def fetch_children_scored(
+    conn: PoolConnectionProxy,
+    user_id: int,
+    node: NodeRow,
+    query_embedding: NDArray[np.float32],
+) -> list[ChildView]:
+    """Scored variant of fetch_children: dispatches on node height and
+    attaches a cosine similarity to each child. See the docstrings on
+    fetch_node_children_scored / fetch_blob_children_scored for the
+    column choice rationale.
+    """
+    if node.height == 0:
+        blobs = await fetch_blob_children_scored(
+            conn, user_id, node.node_id, query_embedding
+        )
+        return list(blobs)
+    nodes = await fetch_node_children_scored(
+        conn, user_id, node.node_id, query_embedding
+    )
     return list(nodes)
