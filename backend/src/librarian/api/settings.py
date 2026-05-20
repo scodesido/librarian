@@ -107,6 +107,16 @@ class QuerySettings(BaseModel):
         return self.voyage_api_key.get_secret_value()
 
 
+class MCPSettings(BaseModel):
+    # TODO: replace with proper per-user auth once claude.ai supports an auth
+    # mechanism that works for us. Today the MCP endpoint is unauthenticated
+    # (intended to be reached only through a private remote reverse-proxy);
+    # every tool call runs as this configured user. Leaving this None makes
+    # the tool fail at call time with a clear "MCP user_id not configured"
+    # message rather than silently picking a user.
+    user_id: int | None = None
+
+
 class Settings(YamlSettings):
     api: ApiSettings = ApiSettings()
     database: PostgresSettings = PostgresSettings()
@@ -115,6 +125,7 @@ class Settings(YamlSettings):
     google_oauth: GoogleOAuthSettings = GoogleOAuthSettings()
     data_files: DataFilesSettings = DataFilesSettings()
     query: QuerySettings = QuerySettings()
+    mcp: MCPSettings = MCPSettings()
 
 
 settings = Settings()
