@@ -15,9 +15,39 @@ interface AbstractFields {
   summary?: string;
   topics?: string[];
   intended_audience?: string;
-  content_type?: string[];
   domains?: string[];
+  content_tags?: string[];
+  format_tags?: string[];
   running_summary?: string;
+}
+
+// Two facets, two colours, so the eye can separate subject from genre
+// at a glance. Membership is guaranteed by the backend's closed
+// vocabularies (service/tags.py); see docs/12.tags.md.
+function TagBadges({
+  abstract,
+  size = "sm",
+}: {
+  abstract: AbstractFields | null | undefined;
+  size?: "xs" | "sm" | "md";
+}) {
+  const content = abstract?.content_tags ?? [];
+  const format = abstract?.format_tags ?? [];
+  if (content.length === 0 && format.length === 0) return null;
+  return (
+    <Group gap={4}>
+      {content.map((t) => (
+        <Badge key={`c-${t}`} size={size} color="blue" variant="light">
+          {t}
+        </Badge>
+      ))}
+      {format.map((t) => (
+        <Badge key={`f-${t}`} size={size} color="grape" variant="light">
+          {t}
+        </Badge>
+      ))}
+    </Group>
+  );
 }
 
 interface NodeChildView {
@@ -77,6 +107,7 @@ function NodeAbstractView({ view }: { view: NodeView }) {
           {view.abstract.summary !== undefined && (
             <Text>{view.abstract.summary}</Text>
           )}
+          <TagBadges abstract={view.abstract} />
           <Text size="sm" c="dimmed">
             Topics: {topicsLine(view.abstract.topics)}
           </Text>
@@ -85,12 +116,6 @@ function NodeAbstractView({ view }: { view: NodeView }) {
               Audience: {view.abstract.intended_audience}
             </Text>
           )}
-          {view.abstract.content_type !== undefined &&
-            view.abstract.content_type.length > 0 && (
-              <Text size="sm" c="dimmed">
-                Type: {view.abstract.content_type.join(", ")}
-              </Text>
-            )}
           {view.abstract.domains !== undefined &&
             view.abstract.domains.length > 0 && (
               <Text size="sm" c="dimmed">
@@ -121,6 +146,7 @@ function NodeChildCard({
       <Group justify="space-between" align="flex-start">
         <Stack gap={4} style={{ flexGrow: 1 }}>
           <Text fw={500}>{topicsLine(child.abstract?.topics)}</Text>
+          <TagBadges abstract={child.abstract} size="xs" />
           <Text size="xs" c="dimmed">
             node #{child.node_id} · height {child.height}
           </Text>
@@ -138,6 +164,7 @@ function BlobChildCard({ child }: { child: BlobChildView }) {
     <Card withBorder shadow="xs" padding="sm">
       <Stack gap={4}>
         <Text fw={500}>{topicsLine(child.abstract.topics)}</Text>
+        <TagBadges abstract={child.abstract} size="xs" />
         <Text size="xs" c="dimmed">
           blob #{child.blob_id} · file #{child.file_id} · index{" "}
           {child.file_blob_index} · range [{child.file_start}, {child.file_end})

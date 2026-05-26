@@ -5,7 +5,7 @@ from asyncpg.pool import PoolConnectionProxy
 from pydantic_ai import Agent
 
 from librarian.db.tables.data_node_abstracts import DataNodeAbstracts
-from librarian.service.abstract import Abstract
+from librarian.service.abstract import AbstractCore
 from librarian.service.node_extractor.abstract import extract_node_abstract
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ async def fetch_children_abstracts(
 
 async def process_one_node(
     conn: PoolConnectionProxy,
-    agent: Agent[None, Abstract],
+    agent: Agent[None, AbstractCore],
     user_id: int,
 ) -> bool:
     """Claim, compute, insert. Returns True iff a node was processed."""

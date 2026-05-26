@@ -3,20 +3,23 @@ from typing import Any
 
 from pydantic_ai import Agent
 
-from librarian.service.abstract import Abstract
+from librarian.service.abstract import Abstract, AbstractCore
 from librarian.service.llm import build_llm_model
 from librarian.service.node_extractor.settings import NodeExtractorSettings
 
 
 def build_node_abstract_agent(
     settings: NodeExtractorSettings,
-) -> Agent[None, Abstract]:
+) -> Agent[None, AbstractCore]:
     # Field *meanings* travel via the output schema (Field(description=...)
-    # on Abstract). The instructions add what the schema can't: synthesis
-    # task context, per-field budgets rendered by AbstractSettings, and
-    # the rule that entity/location fields must only carry forward items
-    # that appear in the children's Abstracts. `budgets_text` (not
-    # `rolling_budgets_text`) — node targets the base Abstract, no
+    # on AbstractCore). The instructions add what the schema can't:
+    # synthesis task context, per-field budgets rendered by
+    # AbstractSettings, and the rule that entity/location fields must
+    # only carry forward items that appear in the children's Abstracts.
+    # The LLM produces AbstractCore (no tag fields at all in the
+    # schema); tags are computed deterministically by the caller as the
+    # sorted set-union of children's tags. `budgets_text` (not
+    # `rolling_budgets_text`) — node targets the base AbstractCore, no
     # running_summary at this layer.
     instructions = (
         "You are given a JSON list of children Abstracts. The children come "
@@ -47,7 +50,7 @@ def build_node_abstract_agent(
     )
     return Agent(
         model,
-        output_type=Abstract,
+        output_type=AbstractCore,
         instructions=instructions,
         model_settings=model_settings,
         retries=settings.llm_output_retries,
@@ -55,9 +58,21 @@ def build_node_abstract_agent(
 
 
 async def extract_node_abstract(
-    agent: Agent[None, Abstract],
+    agent: Agent[None, AbstractCore],
     children_abstracts: list[dict[str, Any]],
 ) -> Abstract:
+    """Produce a node-level Abstract.
+
+    The LLM produces an `AbstractCore` (no tags in the schema, so the
+    model never has to reason about them). The caller computes the
+    children's tag union and constructs the final `Abstract` via
+    `Abstract.model_validate`, which re-runs the unconditional
+    ≥1-per-facet validator. If children somehow lack tags (legacy data,
+    bug upstream), this raises and the worker's backoff loop surfaces
+    it. The closed vocabularies in `service/tags.py` bound the union,
+    so a node at any height carries at most |CONTENT_TAGS| +
+    |FORMAT_TAGS| tags.
+    """
     payload = json.dumps(children_abstracts, indent=2, ensure_ascii=False)
     prompt = (
         "Children Abstracts (as JSON):\n\n"
@@ -65,4 +80,16 @@ async def extract_node_abstract(
         "Produce a single Abstract that synthesizes the whole group."
     )
     result = await agent.run([prompt])
-    return result.output
+    core = result.output
+    content_union: set[str] = set()
+    format_union: set[str] = set()
+    for child in children_abstracts:
+        content_union.update(child.get("content_tags", []))
+        format_union.update(child.get("format_tags", []))
+    return Abstract.model_validate(
+        {
+            **core.model_dump(),
+            "content_tags": sorted(content_union),
+            "format_tags": sorted(format_union),
+        }
+    )

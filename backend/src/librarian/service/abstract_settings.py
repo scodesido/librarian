@@ -30,6 +30,15 @@ class AbstractSettings(BaseModel):
     locations_max_count: int = 5
     time_period_max_count: int = 3
     language_max_count: int = 3
+    # Soft caps for the two librarian-style facet tags. The closed
+    # vocabularies in service/tags.py enforce vocabulary membership at
+    # the schema level (Literal types) and ≥1 at the schema level
+    # (min_length=1 on the tag agent's BlobTags); these counts are
+    # instruction-side hints surfaced via `tag_budgets_text` — the LLM
+    # is told to STRONGLY prefer 1. Not part of `budgets_text` because
+    # the main agent doesn't produce tags anymore.
+    content_tags_max_count: int = 3
+    format_tags_max_count: int = 3
     # Only consumed by the RollingAbstract (blob) path via
     # `rolling_budgets_text`. `budgets_text` (node path) omits it.
     running_summary_words: int = 80
@@ -54,9 +63,23 @@ class AbstractSettings(BaseModel):
         )
 
     @property
+    def tag_budgets_text(self) -> str:
+        """Bullet-list snippet for the tag-classifier agent's
+        instructions. Only the per-facet max counts; the ≥1 minimum and
+        vocabulary membership are enforced by the schema (see BlobTags
+        in service/abstract.py).
+        """
+        return (
+            f"- content_tags: up to {self.content_tags_max_count} items — "
+            f"STRONGLY prefer 1\n"
+            f"- format_tags: up to {self.format_tags_max_count} items — "
+            f"STRONGLY prefer 1"
+        )
+
+    @property
     def rolling_budgets_text(self) -> str:
         """`budgets_text` plus the running_summary line. Used by the
-        blob agent, whose output type is `RollingAbstract`.
+        main blob agent, whose output type is `RollingAbstractCore`.
         """
         return (
             f"{self.budgets_text}\n"

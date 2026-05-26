@@ -5,7 +5,7 @@ from asyncpg import Pool
 from pydantic_ai import Agent
 
 from librarian.db.connect import open_pool
-from librarian.service.abstract import Abstract
+from librarian.service.abstract import AbstractCore
 from librarian.service.backoff import ExponentialBackoff
 from librarian.service.node_extractor.abstract import build_node_abstract_agent
 from librarian.service.node_extractor.pick import pick_user_with_extractable_tree
@@ -15,7 +15,7 @@ from librarian.service.settings import settings
 logger = logging.getLogger(__name__)
 
 
-async def worker_loop(pool: Pool, agent: Agent[None, Abstract]) -> None:
+async def worker_loop(pool: Pool, agent: Agent[None, AbstractCore]) -> None:
     s = settings.node_extractor
     backoff = ExponentialBackoff(
         initial_seconds=s.error_backoff_initial_seconds,
@@ -33,7 +33,7 @@ async def worker_loop(pool: Pool, agent: Agent[None, Abstract]) -> None:
             await backoff.wait_and_advance()
 
 
-async def run_one_iteration(pool: Pool, agent: Agent[None, Abstract]) -> bool:
+async def run_one_iteration(pool: Pool, agent: Agent[None, AbstractCore]) -> bool:
     """One node's abstract, atomically. Returns True iff a node was
     processed.
 

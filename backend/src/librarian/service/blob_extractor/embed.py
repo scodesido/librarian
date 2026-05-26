@@ -41,11 +41,16 @@ def build_embedder(settings: BlobExtractorSettings) -> Embedder:
 
 def serialize_abstract_for_embed(abstract: RollingAbstract) -> str:
     """Compose the RollingAbstract fields that carry semantic prose into a single
-    string. The short-label fields (intended_audience, content_type, domains,
-    persons, organizations, works, other_entities, locations, time_period,
-    language) are kept out — they're more useful as JSONB filters than as
-    similarity anchors. Empty list/string fields are skipped so they don't
-    introduce stray separators.
+    string. The pure-label fields (persons, organizations, works,
+    other_entities, locations, language) are kept out — they're more useful as
+    JSONB filters than as similarity anchors. Empty list/string fields are
+    skipped so they don't introduce stray separators.
+
+    `content_tags` and `format_tags` ARE included even though they're
+    short closed-vocabulary labels: shared tags pull tag-similar blobs
+    together during `tree_builder` descent, which tightens the
+    set-unions at internal nodes. The redundancy with `topics`/`domains`
+    is by design.
     """
     parts: list[str] = [
         abstract.title,
@@ -53,6 +58,8 @@ def serialize_abstract_for_embed(abstract: RollingAbstract) -> str:
         abstract.intended_audience,
         ", ".join(abstract.topics),
         ", ".join(abstract.domains),
+        ", ".join(abstract.content_tags),
+        ", ".join(abstract.format_tags),
         ", ".join(abstract.time_period),
         "\n".join(abstract.key_questions),
         "\n".join(abstract.key_claims),

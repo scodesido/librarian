@@ -1,18 +1,20 @@
 from pydantic_ai import Agent, BinaryContent
 
-from librarian.service.abstract import RollingAbstract
+from librarian.service.abstract import RollingAbstractCore
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
 from librarian.service.llm import build_llm_model
 
 
-def build_abstract_agent(
+def build_main_agent(
     settings: BlobExtractorSettings,
-) -> Agent[None, RollingAbstract]:
+) -> Agent[None, RollingAbstractCore]:
     # Field *meanings* travel via the output schema (Field(description=...)
-    # on RollingAbstract). The instructions add what the schema can't:
-    # task context, per-field budgets rendered by AbstractSettings, and
-    # the explicit-mention rule. `rolling_budgets_text` includes the
-    # running_summary line because the blob agent targets RollingAbstract.
+    # on RollingAbstractCore via AbstractCore). The instructions add
+    # what the schema can't: task context, per-field budgets rendered
+    # by AbstractSettings, and the explicit-mention rule. Tags are NOT
+    # this agent's concern — they're produced by the dedicated tag
+    # classifier in service/blob_extractor/tagging.py, which runs on
+    # this agent's output (title + summary + topics + domains).
     instructions = (
         "You analyze a single blob of content extracted from a larger "
         "document and produce a structured Abstract describing it. Each "
@@ -42,22 +44,24 @@ def build_abstract_agent(
     )
     return Agent(
         model,
-        output_type=RollingAbstract,
+        output_type=RollingAbstractCore,
         instructions=instructions,
         model_settings=model_settings,
         retries=settings.llm_output_retries,
     )
 
 
-async def extract_abstract(
-    agent: Agent[None, RollingAbstract],
+async def extract_main(
+    agent: Agent[None, RollingAbstractCore],
     content_parts: list[str | BinaryContent],
     previous_running_summary: str | None,
-) -> RollingAbstract:
-    """Run the agent with a previous-running-summary header and a
-    caller-built `content_parts` list. The list can carry any mix of
-    strings (text) and BinaryContent (PDF bytes, page images, ...); the
-    caller decides what shape matches the configured `llm_pdf_mode`.
+) -> RollingAbstractCore:
+    """Run the main blob agent with a previous-running-summary header
+    and a caller-built `content_parts` list. The list can carry any mix
+    of strings (text) and BinaryContent (PDF bytes, page images, ...);
+    the caller decides what shape matches the configured
+    `llm_pdf_mode`. Returns the synthesized core fields; tags are
+    classified separately by `service.blob_extractor.tagging`.
     """
     parts: list[str | BinaryContent] = []
     if previous_running_summary is None:

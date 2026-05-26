@@ -11,8 +11,8 @@ from librarian.common.oauth.google.access import (
 )
 from librarian.common.settings.google_oauth import GoogleOAuthSettings
 from librarian.db.tables.data_files import DataFilesModel
-from librarian.service.abstract import RollingAbstract
-from librarian.service.blob_extractor.abstract import extract_abstract
+from librarian.service.abstract import BlobTags, RollingAbstract, RollingAbstractCore
+from librarian.service.blob_extractor.abstract import extract_main
 from librarian.service.blob_extractor.chunk import chunk_pdf, chunk_text
 from librarian.service.blob_extractor.drive import download_file
 from librarian.service.blob_extractor.embed import (
@@ -26,6 +26,7 @@ from librarian.service.blob_extractor.insert import (
 from librarian.service.blob_extractor.pdf_images import pdf_pages_to_pngs
 from librarian.service.blob_extractor.pdf_text import extract_pdf_text
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
+from librarian.service.blob_extractor.tagging import classify_tags
 from librarian.service.embedder import Embedder
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,8 @@ async def process_file(
     file: DataFilesModel,
     conn: PoolConnectionProxy,
     http: ClientSession,
-    agent: Agent[None, RollingAbstract],
+    main_agent: Agent[None, RollingAbstractCore],
+    tag_agent: Agent[None, BlobTags],
     embedder: Embedder,
     settings: BlobExtractorSettings,
     google_oauth_settings: GoogleOAuthSettings,
@@ -161,15 +163,30 @@ async def process_file(
     n_chunks = len(chunks)
     for i, chunk in enumerate(chunks):
         content_parts = build_llm_content_parts(chunk, settings.llm_pdf_mode)
-        abstract = await extract_abstract(agent, content_parts, previous_running)
+        core = await extract_main(main_agent, content_parts, previous_running)
+        tags = await classify_tags(tag_agent, core)
+        # Assemble the final RollingAbstract. model_validate re-runs the
+        # ≥1-per-facet validator from Abstract; the Literal + min_length
+        # constraints on RollingAbstract's tag fields catch any drift
+        # that slipped past the tag agent (which has the same
+        # constraints on BlobTags).
+        abstract = RollingAbstract.model_validate(
+            {
+                **core.model_dump(),
+                "content_tags": tags.content_tags,
+                "format_tags": tags.format_tags,
+            }
+        )
         abstracts.append(abstract)
         previous_running = abstract.running_summary
         logger.info(
-            "blob_extractor: file %s blob %d/%d abstracted: topics=%s",
+            "blob_extractor: file %s blob %d/%d abstracted: topics=%s tags=%s/%s",
             file.file_id,
             i + 1,
             n_chunks,
             abstract.topics,
+            abstract.content_tags,
+            abstract.format_tags,
         )
 
     embedding_blobs = await embed_blobs(

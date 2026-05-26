@@ -8,11 +8,12 @@ from pydantic_ai import Agent
 from librarian.common.http.client import open_client_session
 from librarian.db.connect import open_pool
 from librarian.db.readiness import claim_next_unready_file
-from librarian.service.abstract import RollingAbstract
+from librarian.service.abstract import BlobTags, RollingAbstractCore
 from librarian.service.backoff import ExponentialBackoff
-from librarian.service.blob_extractor.abstract import build_abstract_agent
+from librarian.service.blob_extractor.abstract import build_main_agent
 from librarian.service.blob_extractor.embed import build_embedder
 from librarian.service.blob_extractor.process import process_file
+from librarian.service.blob_extractor.tagging import build_tag_agent
 from librarian.service.embedder import Embedder
 from librarian.service.settings import settings
 
@@ -22,7 +23,8 @@ logger = logging.getLogger(__name__)
 async def worker_loop(
     pool: Pool,
     http: ClientSession,
-    agent: Agent[None, RollingAbstract],
+    main_agent: Agent[None, RollingAbstractCore],
+    tag_agent: Agent[None, BlobTags],
     embedder: Embedder,
 ) -> None:
     s = settings.blob_extractor
@@ -33,7 +35,9 @@ async def worker_loop(
     )
     while True:
         try:
-            did_work = await run_one_iteration(pool, http, agent, embedder)
+            did_work = await run_one_iteration(
+                pool, http, main_agent, tag_agent, embedder
+            )
             backoff.reset()
             if not did_work:
                 await asyncio.sleep(s.poll_interval_seconds)
@@ -47,7 +51,8 @@ async def worker_loop(
 async def run_one_iteration(
     pool: Pool,
     http: ClientSession,
-    agent: Agent[None, RollingAbstract],
+    main_agent: Agent[None, RollingAbstractCore],
+    tag_agent: Agent[None, BlobTags],
     embedder: Embedder,
 ) -> bool:
     """One file's worth of work, atomically. Returns True iff a file was
@@ -80,7 +85,8 @@ async def run_one_iteration(
                 file=file,
                 conn=conn,
                 http=http,
-                agent=agent,
+                main_agent=main_agent,
+                tag_agent=tag_agent,
                 embedder=embedder,
                 settings=s,
                 google_oauth_settings=settings.google_oauth,
@@ -91,7 +97,8 @@ async def run_one_iteration(
 
 async def run_worker() -> None:
     s = settings.blob_extractor
-    agent = build_abstract_agent(s)
+    main_agent = build_main_agent(s)
+    tag_agent = build_tag_agent(s)
     embedder = build_embedder(s)
     logger.info("blob_extractor: starting %d worker(s)", s.concurrent_workers)
     async with (
@@ -100,7 +107,7 @@ async def run_worker() -> None:
     ):
         await asyncio.gather(
             *(
-                worker_loop(pool, http, agent, embedder)
+                worker_loop(pool, http, main_agent, tag_agent, embedder)
                 for _ in range(s.concurrent_workers)
             )
         )

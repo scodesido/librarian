@@ -23,7 +23,7 @@ class BlobExtractorSettings(BaseModel):
     # live as Field(description=...) on service/abstract.py and reach
     # the LLM via the JSON schema; AbstractSettings owns the numeric
     # budgets and renders them into the agent's instructions via
-    # `rolling_budgets_text` (blob targets RollingAbstract).
+    # `rolling_budgets_text` (main blob agent targets RollingAbstractCore).
     # Independent from node_extractor's instance so blob and node can
     # be tuned separately in YAML.
     abstract: AbstractSettings = AbstractSettings()

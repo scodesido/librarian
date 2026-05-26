@@ -1,21 +1,21 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from librarian.service.tags import ContentTag, FormatTag
 
 
-class Abstract(BaseModel):
-    """Per-node/per-blob structured summary. The base shape (no
-    running_summary) is what node_extractor produces for internal nodes,
-    where there's no notion of a rolling chain.
+class AbstractCore(BaseModel):
+    """Synthesized fields produced by the main LLM agent (blob path) or
+    the node-rollup agent (node path). Does NOT include the facet tags
+    — those come from a dedicated classifier on the blob path and from
+    the deterministic set-union of children's tags on the node path.
 
-    Field *meanings* live in `Field(description=...)` below. pydantic-ai
-    forwards each description to the LLM as a JSON-schema property
-    description (via `TypeAdapter.json_schema()`), so the schema is the
-    source of truth for what each field is for. Numeric *budgets* (how
-    many words, how many items) live separately in `AbstractSettings`
-    (see service/abstract_settings.py) and reach the LLM through the
-    agent's instructions, interpolated per-worker via that class's
-    `budgets_text` / `rolling_budgets_text` helpers. That split keeps
-    meanings static and budgets per-worker-tunable, without dynamic
-    class creation.
+    Field *meanings* live as `Field(description=...)` on each field and
+    travel to the LLM as JSON-schema property descriptions. Numeric
+    *budgets* (word counts, item caps) live in `AbstractSettings` and
+    reach the LLM through the agent's instructions, interpolated via
+    `budgets_text` / `rolling_budgets_text`. That split keeps meanings
+    static and budgets per-worker-tunable, without dynamic class
+    creation.
     """
 
     title: str = Field(
@@ -96,12 +96,6 @@ class Abstract(BaseModel):
     intended_audience: str = Field(
         description="Short phrase describing who would read this content.",
     )
-    content_type: list[str] = Field(
-        description=(
-            "Format/style tags. 1-3 items chosen from: essay, data, "
-            "technical doc, law, charts, narrative, reference, code, other."
-        ),
-    )
     domains: list[str] = Field(
         description=(
             "Subject domains the content sits in (e.g. 'machine learning', "
@@ -111,15 +105,71 @@ class Abstract(BaseModel):
     )
 
 
-class RollingAbstract(Abstract):
-    """blob_extractor's per-blob Abstract: the base fields plus a
-    running_summary that the LLM weaves into the previous blob's
-    running_summary, anchoring the chain across one file's blobs.
+class Abstract(AbstractCore):
+    """AbstractCore + the two closed-vocabulary facet tags. This is the
+    shape persisted in `data_blobs.abstract` and
+    `data_node_abstracts.abstract`. The model_validator enforces ≥1 per
+    facet unconditionally — every persisted Abstract must satisfy it.
 
-    The default empty string lets a base Abstract JSON validate as a
-    RollingAbstract — useful when a consumer wants one uniform shape
-    regardless of whether the row came from data_blobs or
-    data_node_abstracts.
+    On the blob path, the tags come from the dedicated tag-classifier
+    agent (see service/blob_extractor/tagging.py). On the node path,
+    they come from the sorted set-union of the children's tags.
+    """
+
+    content_tags: list[ContentTag] = Field(
+        default_factory=list,
+        description=(
+            "Subject-matter facet tags from a fixed closed vocabulary "
+            "(e.g. 'math', 'history', 'computer-science'). At least one "
+            "is required at every persistence boundary; strongly prefer "
+            "exactly one. See librarian.service.tags."
+        ),
+    )
+    format_tags: list[FormatTag] = Field(
+        default_factory=list,
+        description=(
+            "Genre/form facet tags from a fixed closed vocabulary "
+            "(e.g. 'article', 'book', 'report'). At least one is "
+            "required at every persistence boundary; strongly prefer "
+            "exactly one. See librarian.service.tags."
+        ),
+    )
+
+    # Pydantic's Literal validation already enforces membership; these
+    # validators only canonicalise (sort + dedupe) so JSONB on disk is
+    # stable and the node-level set-union semantics are deterministic.
+    @field_validator("content_tags")
+    @classmethod
+    def sort_content_tags(cls, v: list[ContentTag]) -> list[ContentTag]:
+        return sorted(set(v))
+
+    @field_validator("format_tags")
+    @classmethod
+    def sort_format_tags(cls, v: list[FormatTag]) -> list[FormatTag]:
+        return sorted(set(v))
+
+    @model_validator(mode="after")
+    def require_tags_per_facet(self) -> "Abstract":
+        if not self.content_tags:
+            raise ValueError(
+                "content_tags must contain at least one tag; tags are not "
+                "optional at persistence — they are what the node-level "
+                "union propagates upward"
+            )
+        if not self.format_tags:
+            raise ValueError(
+                "format_tags must contain at least one tag; tags are not "
+                "optional at persistence — they are what the node-level "
+                "union propagates upward"
+            )
+        return self
+
+
+class RollingAbstractCore(AbstractCore):
+    """Main blob agent's output type: AbstractCore + the rolling summary
+    that the LLM weaves blob-to-blob. Tags are NOT in this schema — the
+    tag agent produces them separately and the caller assembles the
+    final RollingAbstract.
     """
 
     running_summary: str = Field(
@@ -130,5 +180,60 @@ class RollingAbstract(Abstract):
             "this first blob alone; for subsequent blobs weave the new "
             "blob's content into the previous running_summary supplied in "
             "the user prompt."
+        ),
+    )
+
+
+class RollingAbstract(Abstract):
+    """Final blob-level Abstract persisted to `data_blobs.abstract`:
+    Abstract + running_summary. The schema-level `enum` + `minItems: 1`
+    constraints for the tag agent's output live on `BlobTags`, not
+    here — RollingAbstract is never an LLM output type, it's
+    constructed from a validated `RollingAbstractCore` + a validated
+    `BlobTags` by `process_file`. Re-validation through the inherited
+    `Abstract` validators still catches drift.
+
+    The default empty string on running_summary lets a base Abstract
+    JSON validate as a RollingAbstract — useful when a consumer wants
+    one uniform shape regardless of whether the row came from
+    data_blobs or data_node_abstracts.
+    """
+
+    running_summary: str = Field(
+        default="",
+        description=(
+            "Rolling summary of the document so far. For the first blob of "
+            "a file infer what the whole document seems to be about from "
+            "this first blob alone; for subsequent blobs weave the new "
+            "blob's content into the previous running_summary supplied in "
+            "the user prompt."
+        ),
+    )
+
+
+class BlobTags(BaseModel):
+    """Tag-classifier agent's output type. Standalone (not a subclass of
+    Abstract) so the LLM's JSON schema contains only the two fields it
+    needs to populate, with `enum` (via Literal) and `minItems: 1` (via
+    min_length) constraints carried into the schema. That combination
+    makes empty or out-of-vocab tag emission structurally impossible
+    rather than relying on prompt phrasing.
+    """
+
+    content_tags: list[ContentTag] = Field(
+        min_length=1,
+        description=(
+            "Subject-matter facet tags from the allowed vocabulary. AT "
+            "LEAST ONE is required; strongly prefer exactly one — add a "
+            "second only when the content genuinely spans multiple "
+            "domains."
+        ),
+    )
+    format_tags: list[FormatTag] = Field(
+        min_length=1,
+        description=(
+            "Genre/form facet tags from the allowed vocabulary. AT LEAST "
+            "ONE is required; strongly prefer exactly one — add a second "
+            "only when the content genuinely spans multiple formats."
         ),
     )
