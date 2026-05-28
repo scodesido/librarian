@@ -10,6 +10,11 @@ def entrypoint():
         host=settings.api.host,
         port=settings.api.port,
         reload=settings.api.reload,
-        root_path=settings.api.root_path,
         workers=settings.api.workers,
+        # When deployed behind a reverse proxy, trust X-Forwarded-Proto /
+        # Host / Prefix so `request.url_for(...)` (used by the Google
+        # OAuth callback URL) reflects the public-facing URL. Off by
+        # default — see ApiSettings for the rationale.
+        proxy_headers=settings.api.uvicorn_proxy_headers,
+        forwarded_allow_ips=settings.api.uvicorn_forwarded_allow_ips,
     )

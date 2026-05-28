@@ -32,10 +32,11 @@ class BlobExtractorSettings(BaseModel):
     #   * LLM: pydantic-ai model string "<provider>:<model>".
     #   * Embedding: librarian.service.embedder dispatch on "<provider>:<model>".
     # Currently wired up:
-    #   * llm_model:       "anthropic:...", "ollama:..."
+    #   * llm_model:       "anthropic:...", "openai:...", "xai:...",
+    #                      "ollama:..."
     #   * embedding_model: "ollama:...", "voyageai:..."
     # llm_model: str = "anthropic:claude-haiku-4-5"
-    llm_model: str = "ollama:qwen3.5:9b"
+    llm_model: str = "anthropic:claude-haiku-4-5"
     embedding_model: str = "ollama:qwen3-embedding:0.6b"
 
     # How PDFs reach the LLM. Three strategies:
@@ -47,7 +48,7 @@ class BlobExtractorSettings(BaseModel):
     #               vision capability of multimodal models (gemma3,
     #               llama3.2-vision, …); ~256 tokens/page.
     # The embedder always sees pypdf-extracted text regardless of mode.
-    llm_pdf_mode: Literal["text", "binary", "images"] = "images"
+    llm_pdf_mode: Literal["text", "binary", "images"] = "binary"
 
     # Rasterization DPI for the "images" mode. 150 keeps body text
     # legible after the vision model's internal downscale.
@@ -97,21 +98,23 @@ class BlobExtractorSettings(BaseModel):
     # file. 3 has been enough in practice for transient hiccups.
     llm_output_retries: int = 3
 
-    # API keys passed explicitly to the providers (rather than letting the
-    # SDKs read them from env). This is the seam that will later carry
-    # values mounted as secret files. voyage_api_key is only required when
+    # API tokens passed explicitly to the providers (rather than letting
+    # the SDKs read them from env). One token per slot — the chosen
+    # model string determines which provider consumes it — rather than
+    # one field per provider. This is the seam that will later carry
+    # values mounted as secret files, and the shape we expect to expose
+    # to end users via the UI (a single "your API key" field per slot,
+    # not a key per supported provider).
+    #
+    # `llm_api_token` covers the LLM model; `embedder_api_token` covers
+    # the embedding model. Either is unused for providers that need no
+    # auth (ollama). `embedder_api_token` is only required when
     # `embedding_model` selects the voyageai provider.
-    anthropic_api_key: SecretStr | None = None
-    voyage_api_key: SecretStr | None = None
+    llm_api_token: SecretStr | None = None
+    embedder_api_token: SecretStr | None = None
 
     @property
-    def get_anthropic_api_key(self) -> str:
-        if self.anthropic_api_key is None:
-            raise ValueError("blob_extractor.anthropic_api_key is not configured")
-        return self.anthropic_api_key.get_secret_value()
-
-    @property
-    def get_voyage_api_key(self) -> str:
-        if self.voyage_api_key is None:
-            raise ValueError("blob_extractor.voyage_api_key is not configured")
-        return self.voyage_api_key.get_secret_value()
+    def get_embedder_api_token(self) -> str:
+        if self.embedder_api_token is None:
+            raise ValueError("blob_extractor.embedder_api_token is not configured")
+        return self.embedder_api_token.get_secret_value()

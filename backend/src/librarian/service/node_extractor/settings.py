@@ -23,10 +23,30 @@ class NodeExtractorSettings(BaseModel):
     abstract: AbstractSettings = AbstractSettings()
 
     # Model selection. Provider prefix picks the backend; see
-    # librarian/service/llm.py. "anthropic:..." or "ollama:..." supported.
-    # llm_model: str = "anthropic:claude-haiku-4-5"
-    llm_model: str = "ollama:qwen3.5:9b"
-    anthropic_api_key: SecretStr | None = None
+    # librarian/service/llm.py. "anthropic:...", "openai:...",
+    # "xai:..." or "ollama:..." supported.
+    #
+    # Split by node height: height-0 (leaf) nodes synthesize from blob
+    # Abstracts, a relatively constrained task that a small/cheap model
+    # handles well. Height>0 (internal) nodes synthesize from synthesized
+    # Abstracts — each subsequent level adds compression and the model
+    # has to keep more nuance in mind to write a summary that lets the
+    # retrieval agent reach every child (including outliers). A more
+    # capable model is worth the cost there. Defaults reflect that:
+    # haiku for leaves, sonnet for internal. Both can be overridden
+    # independently in YAML, e.g. set both to the same model to disable
+    # the split, or point leaf at a local ollama and internal at
+    # anthropic to mix providers.
+    llm_model_leaf: str = "anthropic:claude-haiku-4-5"
+    llm_model_internal: str = "anthropic:claude-sonnet-4-5"
+    # Single LLM api token used for whichever provider both
+    # `llm_model_leaf` and `llm_model_internal` resolve to. Sharing one
+    # token is the common case (same provider across heights, possibly
+    # different model sizes); if a user wires the two heights to
+    # different providers, the same token field carries that provider's
+    # key — the chosen model string determines which provider consumes
+    # it. Unused for ollama, which has no auth.
+    llm_api_token: SecretStr | None = None
 
     # Local ollama daemon URL. Default works for non-containerised dev;
     # in docker-compose the dev config overrides to host.docker.internal.
@@ -40,9 +60,3 @@ class NodeExtractorSettings(BaseModel):
     # Number of pydantic-ai retries on Abstract validation failure (see
     # BlobExtractorSettings.llm_output_retries for the rationale).
     llm_output_retries: int = 3
-
-    @property
-    def get_anthropic_api_key(self) -> str:
-        if self.anthropic_api_key is None:
-            raise ValueError("node_extractor.anthropic_api_key is not configured")
-        return self.anthropic_api_key.get_secret_value()

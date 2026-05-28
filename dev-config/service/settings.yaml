@@ -9,6 +9,7 @@ database:
   name: librarian
 
 google_oauth:
+  # This is an adhoc, dev encryption key
   token_encryption_key: 6DERvXJRIJQChZY06cGR1A0Aj8o0CS0zh40H7wtv-kU=
 
 blob_extractor:
@@ -18,22 +19,9 @@ blob_extractor:
   llm_model: anthropic:claude-haiku-4-5
   llm_pdf_mode: binary
 
-
 node_extractor:
   concurrent_workers: 3
-
   ollama_host: http://librarian-ollama:11434
-  llm_model: anthropic:claude-haiku-4-5
 
 http_client:
   timeout: 900
-
-# google_oauth.client_id, .client_secret and .token_encryption_key are
-# expected via env (LIBRARIAN__GOOGLE_OAUTH__CLIENT_ID, _CLIENT_SECRET,
-# _TOKEN_ENCRYPTION_KEY) — typically loaded from a local .env file. The
-# LLM/embedding API keys are per-worker; for the same model provider you
-# can set the same value across each worker's slot:
-#   LIBRARIAN__BLOB_EXTRACTOR__ANTHROPIC_API_KEY
-#   LIBRARIAN__BLOB_EXTRACTOR__VOYAGE_API_KEY (only if embedding_model
-#       is set to a "voyageai:..." string; ollama is the default)
-#   LIBRARIAN__NODE_EXTRACTOR__ANTHROPIC_API_KEY

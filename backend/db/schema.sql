@@ -610,6 +610,75 @@ ALTER SEQUENCE public.data_nodes_node_id_seq OWNED BY public.data_nodes.node_id;
 
 
 --
+-- Name: oauth_access_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_access_tokens (
+    token_hash bytea NOT NULL,
+    user_id bigint NOT NULL,
+    client_id text NOT NULL,
+    scopes text[] NOT NULL,
+    resource text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: oauth_authorization_grants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_authorization_grants (
+    code text NOT NULL,
+    client_id text NOT NULL,
+    user_id bigint,
+    redirect_uri text NOT NULL,
+    redirect_uri_explicit boolean NOT NULL,
+    code_challenge text NOT NULL,
+    requested_scopes text[] NOT NULL,
+    resource text,
+    client_state text,
+    status text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oauth_authorization_grants_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'granted'::text, 'consumed'::text]))),
+    CONSTRAINT oauth_authorization_grants_user_id_status_check CHECK (((status = 'pending'::text) = (user_id IS NULL)))
+);
+
+
+--
+-- Name: oauth_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_clients (
+    client_id text NOT NULL,
+    client_name text NOT NULL,
+    redirect_uris text[] NOT NULL,
+    scopes text[] DEFAULT ARRAY[]::text[] NOT NULL,
+    grant_types text[] DEFAULT ARRAY['authorization_code'::text, 'refresh_token'::text] NOT NULL,
+    response_types text[] DEFAULT ARRAY['code'::text] NOT NULL,
+    token_endpoint_auth_method text DEFAULT 'none'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: oauth_refresh_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_refresh_tokens (
+    token_hash bytea NOT NULL,
+    user_id bigint NOT NULL,
+    client_id text NOT NULL,
+    scopes text[] NOT NULL,
+    resource text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -834,6 +903,38 @@ ALTER TABLE ONLY public.data_nodes
 
 
 --
+-- Name: oauth_access_tokens oauth_access_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_access_tokens
+    ADD CONSTRAINT oauth_access_tokens_pkey PRIMARY KEY (token_hash);
+
+
+--
+-- Name: oauth_authorization_grants oauth_authorization_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_authorization_grants
+    ADD CONSTRAINT oauth_authorization_grants_pkey PRIMARY KEY (code);
+
+
+--
+-- Name: oauth_clients oauth_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_clients
+    ADD CONSTRAINT oauth_clients_pkey PRIMARY KEY (client_id);
+
+
+--
+-- Name: oauth_refresh_tokens oauth_refresh_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_refresh_tokens
+    ADD CONSTRAINT oauth_refresh_tokens_pkey PRIMARY KEY (token_hash);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -931,6 +1032,41 @@ CREATE INDEX idx_data_nodes_user_height ON public.data_nodes USING btree (user_i
 --
 
 CREATE INDEX idx_data_nodes_user_root ON public.data_nodes USING btree (user_id) WHERE is_root;
+
+
+--
+-- Name: idx_oauth_access_tokens_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oauth_access_tokens_expires_at ON public.oauth_access_tokens USING btree (expires_at);
+
+
+--
+-- Name: idx_oauth_access_tokens_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oauth_access_tokens_user_id ON public.oauth_access_tokens USING btree (user_id);
+
+
+--
+-- Name: idx_oauth_authorization_grants_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oauth_authorization_grants_expires_at ON public.oauth_authorization_grants USING btree (expires_at);
+
+
+--
+-- Name: idx_oauth_refresh_tokens_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oauth_refresh_tokens_expires_at ON public.oauth_refresh_tokens USING btree (expires_at);
+
+
+--
+-- Name: idx_oauth_refresh_tokens_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oauth_refresh_tokens_user_id ON public.oauth_refresh_tokens USING btree (user_id);
 
 
 --
@@ -1102,6 +1238,41 @@ CREATE TRIGGER data_nodes_prevent_any_update BEFORE UPDATE ON public.data_nodes 
 
 
 --
+-- Name: oauth_access_tokens oauth_access_tokens_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER oauth_access_tokens_prevent_created_at_change BEFORE UPDATE ON public.oauth_access_tokens FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
+
+
+--
+-- Name: oauth_authorization_grants oauth_authorization_grants_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER oauth_authorization_grants_prevent_created_at_change BEFORE UPDATE ON public.oauth_authorization_grants FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
+
+
+--
+-- Name: oauth_authorization_grants oauth_authorization_grants_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER oauth_authorization_grants_set_updated_at BEFORE UPDATE ON public.oauth_authorization_grants FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: oauth_clients oauth_clients_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER oauth_clients_prevent_created_at_change BEFORE UPDATE ON public.oauth_clients FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
+
+
+--
+-- Name: oauth_refresh_tokens oauth_refresh_tokens_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER oauth_refresh_tokens_prevent_created_at_change BEFORE UPDATE ON public.oauth_refresh_tokens FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
+
+
+--
 -- Name: users users_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1252,6 +1423,54 @@ ALTER TABLE ONLY public.data_nodes
 
 
 --
+-- Name: oauth_access_tokens oauth_access_tokens_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_access_tokens
+    ADD CONSTRAINT oauth_access_tokens_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.oauth_clients(client_id) ON DELETE CASCADE;
+
+
+--
+-- Name: oauth_access_tokens oauth_access_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_access_tokens
+    ADD CONSTRAINT oauth_access_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: oauth_authorization_grants oauth_authorization_grants_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_authorization_grants
+    ADD CONSTRAINT oauth_authorization_grants_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.oauth_clients(client_id) ON DELETE CASCADE;
+
+
+--
+-- Name: oauth_authorization_grants oauth_authorization_grants_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_authorization_grants
+    ADD CONSTRAINT oauth_authorization_grants_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: oauth_refresh_tokens oauth_refresh_tokens_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_refresh_tokens
+    ADD CONSTRAINT oauth_refresh_tokens_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.oauth_clients(client_id) ON DELETE CASCADE;
+
+
+--
+-- Name: oauth_refresh_tokens oauth_refresh_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_refresh_tokens
+    ADD CONSTRAINT oauth_refresh_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- PostgreSQL database dump complete
 --
 
@@ -1270,4 +1489,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('202605180004'),
     ('202605180005'),
     ('202605180006'),
-    ('202605180007');
+    ('202605180007'),
+    ('202605260001');

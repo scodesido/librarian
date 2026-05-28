@@ -9,9 +9,9 @@ into `ctx.report_progress(...)` notifications so the calling LLM sees
 the agent's tree walk land on the tool card under the spinner. The
 final answer arrives as the tool result.
 
-Auth is intentionally absent for now (see `MCPSettings.user_id` for the
-TODO). The endpoint should be reached only via a private remote reverse
-proxy.
+Per-call user identity arrives via the SDK's OAuth flow: the bearer
+middleware (wired in `app.py`) populates a contextvar with the active
+`LibrarianAccessToken`, which the tool reads via `get_access_token()`.
 """
 
 import logging
@@ -21,12 +21,13 @@ from typing import Any
 from aiohttp import ClientSession
 from asyncpg import Pool
 from fastapi import HTTPException
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-from librarian.api.settings import settings
+from librarian.api.core.oauth.auth_server.provider import LibrarianAccessToken
 from librarian.service.retrieval.events import (
     BlobResult,
     ExpandEvent,
@@ -43,21 +44,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MCPDeps:
-    """Shared dependencies the MCP tool needs to run a retrieval. Held by
-    `mcp_deps` (set during the FastAPI lifespan) because a tool callback
-    running inside the mounted Starlette sub-app has no clean handle on
-    the parent FastAPI app's `state`.
+    """Pool + HTTP client the MCP tool needs to run a retrieval. Held
+    module-level (populated from the FastAPI lifespan) because a tool
+    callback running inside the mounted Starlette sub-app has no clean
+    handle on the parent FastAPI app's `state`. The per-user identity
+    moved out of here — it now comes from the SDK's OAuth access token
+    on every call (see `current_user_id`).
     """
 
     pool: Pool
     http: ClientSession
 
 
-# Mutable singleton, populated by `attach_deps` during FastAPI startup and
-# cleared by `detach_deps` on shutdown. Module-level rather than on the
-# FastMCP instance so the tool function can read it without going through
-# `ctx.fastmcp` (which would entangle the tool with FastMCP internals more
-# than necessary).
 mcp_deps: MCPDeps | None = None
 
 
@@ -77,6 +75,28 @@ def get_deps() -> MCPDeps:
             "MCP deps are not attached. Check the FastAPI lifespan wiring."
         )
     return mcp_deps
+
+
+def current_user_id() -> int:
+    """Read the authenticated user_id off the active OAuth access token.
+
+    The bearer middleware in `app.py` runs ahead of every /mcp request
+    and populates a contextvar via `AuthContextMiddleware`; this helper
+    is the bridge to that contextvar. Inside a tool callback there is
+    no clean way to reach the request scope otherwise (Context only
+    exposes session-level state), so we go through the SDK's official
+    accessor.
+    """
+    access_token = get_access_token()
+    if access_token is None or not isinstance(access_token, LibrarianAccessToken):
+        # Should not happen under normal use: RequireAuthMiddleware would
+        # have already rejected an unauthenticated request with 401. If
+        # we reach the tool body without a LibrarianAccessToken,
+        # something has been mis-wired upstream.
+        raise RuntimeError(
+            "MCP tool invoked without an authenticated LibrarianAccessToken."
+        )
+    return access_token.user_id
 
 
 class MCPQueryResult(BaseModel):
@@ -192,12 +212,7 @@ async def query_library(
     ctx: Context,  # type: ignore[type-arg]
 ) -> MCPQueryResult:
     deps = get_deps()
-    user_id = settings.mcp.user_id
-    if user_id is None:
-        # No auth means no per-call user identity; we rely on the operator
-        # pinning the MCP to one user. Surfaced as a tool error so the
-        # calling LLM sees a clear message rather than a generic 500.
-        raise ValueError("MCP user_id is not configured. Set LIBRARIAN__MCP__USER_ID.")
+    user_id = current_user_id()
 
     # Progress state, updated as the agent descends. Only ExpandEvent carries
     # the step/budget pair; TermsEvent and FetchEvent reuse the last known

@@ -59,14 +59,14 @@ def build_extractor_agent(settings: QuerySettings) -> Agent[None, ExtractedTerms
     Same provider plumbing as the retrieval agent so a single set of LLM
     credentials covers both.
     """
-    anthropic_api_key = (
-        settings.anthropic_api_key.get_secret_value()
-        if settings.anthropic_api_key is not None
+    api_token = (
+        settings.llm_api_token.get_secret_value()
+        if settings.llm_api_token is not None
         else None
     )
     model, model_settings = build_llm_model(
         settings.extract_llm_model,
-        anthropic_api_key=anthropic_api_key,
+        api_token=api_token,
         ollama_host=settings.ollama_host,
         ollama_num_ctx=settings.ollama_num_ctx,
         cache_instructions=True,

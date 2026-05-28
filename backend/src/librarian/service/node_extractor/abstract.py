@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic_ai import Agent
@@ -8,8 +9,33 @@ from librarian.service.llm import build_llm_model
 from librarian.service.node_extractor.settings import NodeExtractorSettings
 
 
+@dataclass(frozen=True)
+class NodeAgents:
+    """Per-height agent pair. `leaf` runs on height-0 nodes (children
+    are blob Abstracts), `internal` runs on height>0 nodes (children
+    are node Abstracts, themselves already a synthesis — a more
+    capable model pays off here). Built once at worker startup and
+    threaded through the iteration; `process_one_node` picks which to
+    use based on the claimed node's height.
+
+    Plain dataclass (not Pydantic BaseModel): the fields are
+    pydantic-ai `Agent` instances, which aren't a pydantic-validatable
+    type. We never serialise or round-trip this container — it's just
+    a lightweight bag — so the pydantic machinery would only get in
+    the way (and indeed pydantic's CoreSchema generation fails on
+    `Agent` even with `arbitrary_types_allowed=True`).
+    """
+
+    leaf: Agent[None, AbstractCore]
+    internal: Agent[None, AbstractCore]
+
+    def for_height(self, height: int) -> Agent[None, AbstractCore]:
+        return self.leaf if height == 0 else self.internal
+
+
 def build_node_abstract_agent(
     settings: NodeExtractorSettings,
+    llm_model: str,
 ) -> Agent[None, AbstractCore]:
     # Field *meanings* travel via the output schema (Field(description=...)
     # on AbstractCore). The instructions add what the schema can't:
@@ -31,20 +57,38 @@ def build_node_abstract_agent(
         "for sizing each field.\n\n"
         "Field budgets:\n"
         f"{settings.abstract.budgets_text}\n\n"
+        "About the `summary` field: this Abstract will be read by a "
+        "downstream retrieval agent that walks the tree top-down to find "
+        "the children most relevant to a user's question. The `summary` is "
+        "that agent's primary cue for deciding (a) whether to descend into "
+        "this subtree at all and (b) which children to follow once it does. "
+        "Write it so that every child is reachable through it. Specifically:\n"
+        "  - Cover the breadth of what is underneath, not just the dominant "
+        "theme. If the children share one broad subject, name it; if they "
+        "split into a few distinct subjects, name each.\n"
+        "  - Call out outliers by name. If most children cover one topic "
+        "and one or two diverge into something different (the 'odd one "
+        "out'), the summary MUST mention those outliers explicitly — "
+        "otherwise the retrieval agent will never descend to them. A short "
+        "phrase is enough (e.g. '… and one chapter on medieval poetry'), "
+        "but the outlier subject has to appear in the text.\n"
+        "  - Favor concrete, search-friendly vocabulary (the specific "
+        "topics, domains, entities the children actually discuss) over "
+        "generic framing ('various documents about several topics').\n\n"
         "For persons, organizations, works, other_entities, and locations, "
         "include only items that already appear in the children's Abstracts "
         "(those have already been filtered to explicit mentions). Pick the "
         "most representative across the group; leave the list empty if no "
         "such items appear in the children — do not invent or infer."
     )
-    api_key = (
-        settings.anthropic_api_key.get_secret_value()
-        if settings.anthropic_api_key is not None
+    api_token = (
+        settings.llm_api_token.get_secret_value()
+        if settings.llm_api_token is not None
         else None
     )
     model, model_settings = build_llm_model(
-        settings.llm_model,
-        anthropic_api_key=api_key,
+        llm_model,
+        api_token=api_token,
         ollama_host=settings.ollama_host,
         ollama_num_ctx=settings.ollama_num_ctx,
     )
@@ -54,6 +98,18 @@ def build_node_abstract_agent(
         instructions=instructions,
         model_settings=model_settings,
         retries=settings.llm_output_retries,
+    )
+
+
+def build_node_agents(settings: NodeExtractorSettings) -> NodeAgents:
+    """Build both the leaf-height and internal-height agents up-front,
+    so per-iteration cost is just `agent.run(...)` (no per-call agent
+    construction). The two agents share the same instructions and
+    output type; only the underlying model differs.
+    """
+    return NodeAgents(
+        leaf=build_node_abstract_agent(settings, settings.llm_model_leaf),
+        internal=build_node_abstract_agent(settings, settings.llm_model_internal),
     )
 
 

@@ -22,6 +22,7 @@ from librarian.db.tables.users import Users
 router = APIRouter(prefix="/oauth/google")
 
 STATE_COOKIE = "oauth_state"
+NEXT_COOKIE = "oauth_next"
 STATE_TTL = timedelta(minutes=10)
 CALLBACK_NAME = "oauth_google_callback"
 
@@ -30,8 +31,24 @@ def callback_url(request: Request) -> str:
     return str(request.url_for(CALLBACK_NAME))
 
 
+def validate_next(value: str) -> str | None:
+    """Accept only same-origin path-only redirects. Returns the validated
+    value or None.
+
+    Open-redirect defense: we never honour a `next=` that carries a scheme
+    or host, even if it looks same-origin — string comparison against a
+    configured allowlist is brittle and the only thing we actually want
+    here is "send the user back to some path on this server". So enforce
+    `next` starts with `/` (and not `//`, which most browsers parse as a
+    protocol-relative URL).
+    """
+    if not value.startswith("/") or value.startswith("//"):
+        return None
+    return value
+
+
 @router.get("/login")
-async def login(request: Request) -> RedirectResponse:
+async def login(request: Request, next: str | None = None) -> RedirectResponse:
     state = token_urlsafe(16)
     response = RedirectResponse(
         build_authorize_url(settings.google_oauth, callback_url(request), state)
@@ -44,6 +61,21 @@ async def login(request: Request) -> RedirectResponse:
         secure=settings.google_oauth.cookie_secure,
         samesite="lax",
     )
+    # `next=` is honoured at /callback to support flows that need to come
+    # back through a specific path (today: the MCP OAuth bridge endpoint).
+    # We stash it in a short-lived cookie alongside the state cookie so
+    # the value survives the round trip to Google.
+    if next is not None:
+        validated_next = validate_next(next)
+        if validated_next is not None:
+            response.set_cookie(
+                key=NEXT_COOKIE,
+                value=validated_next,
+                max_age=int(STATE_TTL.total_seconds()),
+                httponly=True,
+                secure=settings.google_oauth.cookie_secure,
+                samesite="lax",
+            )
     return response
 
 
@@ -55,6 +87,7 @@ async def callback(
     code: str | None = None,
     state: str | None = None,
     oauth_state: Annotated[str | None, Cookie(alias=STATE_COOKIE)] = None,
+    oauth_next: Annotated[str | None, Cookie(alias=NEXT_COOKIE)] = None,
 ) -> RedirectResponse:
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
@@ -102,8 +135,16 @@ async def callback(
             ttl=timedelta(days=settings.google_oauth.session_ttl_days),
         )
 
-    response = RedirectResponse(settings.google_oauth.post_login_redirect)
+    # Honour a stashed `next=` path if it survived the round trip
+    # (re-validated here in case the cookie was tampered with). Otherwise
+    # fall back to the configured post-login URL (the FE root).
+    next_target: str | None = None
+    if oauth_next is not None:
+        next_target = validate_next(oauth_next)
+    redirect_target = next_target or settings.google_oauth.post_login_redirect
+    response = RedirectResponse(redirect_target)
     response.delete_cookie(STATE_COOKIE)
+    response.delete_cookie(NEXT_COOKIE)
     response.set_cookie(
         key=settings.cookies.session_cookie_name,
         value=session_id,

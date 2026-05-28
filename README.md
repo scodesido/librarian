@@ -4,10 +4,26 @@
 ```
 LIBRARIAN__GOOGLE_OAUTH__CLIENT_ID=...
 LIBRARIAN__GOOGLE_OAUTH__CLIENT_SECRET=...
-LIBRARIAN__BLOB_EXTRACTOR__ANTHROPIC_API_KEY=...
-LIBRARIAN__NODE_EXTRACTOR__ANTHROPIC_API_KEY=...
-LIBRARIAN__QUERY__ANTHROPIC_API_KEY=...
+LIBRARIAN__BLOB_EXTRACTOR__LLM_API_TOKEN=...
+LIBRARIAN__NODE_EXTRACTOR__LLM_API_TOKEN=...
+LIBRARIAN__QUERY__LLM_API_TOKEN=...
 ```
+
+The `*_LLM_API_TOKEN` values are interpreted by whichever provider
+the corresponding model setting selects (anthropic, openai, xai, …).
+The default model strings live in `dev-config/` YAML; override per
+slot via env if you prefer:
+```
+LIBRARIAN__BLOB_EXTRACTOR__LLM_MODEL=anthropic:claude-haiku-4-5
+LIBRARIAN__NODE_EXTRACTOR__LLM_MODEL_LEAF=anthropic:claude-haiku-4-5
+LIBRARIAN__NODE_EXTRACTOR__LLM_MODEL_INTERNAL=anthropic:claude-sonnet-4-5
+LIBRARIAN__QUERY__LLM_MODEL=anthropic:claude-haiku-4-5
+LIBRARIAN__QUERY__EXTRACT_LLM_MODEL=anthropic:claude-haiku-4-5
+```
+
+For non-default embedders (voyage), also set
+`LIBRARIAN__BLOB_EXTRACTOR__EMBEDDER_API_TOKEN` and
+`LIBRARIAN__QUERY__EMBEDDER_API_TOKEN`.
 
 ## Remote MCP via `ssh -R` + nginx
 

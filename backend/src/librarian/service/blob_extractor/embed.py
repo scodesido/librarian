@@ -29,7 +29,7 @@ def build_embedder(settings: BlobExtractorSettings) -> Embedder:
         )
     if provider_name == "voyageai":
         return VoyageEmbedder(
-            api_key=settings.get_voyage_api_key,
+            api_key=settings.get_embedder_api_token,
             model=model_name,
             dimensions=settings.embedding_dimensions,
         )

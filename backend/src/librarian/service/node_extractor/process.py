@@ -2,11 +2,9 @@ import logging
 from typing import Any
 
 from asyncpg.pool import PoolConnectionProxy
-from pydantic_ai import Agent
 
 from librarian.db.tables.data_node_abstracts import DataNodeAbstracts
-from librarian.service.abstract import AbstractCore
-from librarian.service.node_extractor.abstract import extract_node_abstract
+from librarian.service.node_extractor.abstract import NodeAgents, extract_node_abstract
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +90,15 @@ async def fetch_children_abstracts(
 
 async def process_one_node(
     conn: PoolConnectionProxy,
-    agent: Agent[None, AbstractCore],
+    agents: NodeAgents,
     user_id: int,
 ) -> bool:
-    """Claim, compute, insert. Returns True iff a node was processed."""
+    """Claim, compute, insert. Returns True iff a node was processed.
+
+    `agents` carries a per-height agent pair; the claimed node's height
+    selects which one runs (haiku-class at height 0, sonnet-class above,
+    by default — see NodeExtractorSettings).
+    """
     claimed = await claim_next_extractable_node(conn, user_id)
     if claimed is None:
         return False
@@ -113,7 +116,7 @@ async def process_one_node(
         height,
         len(children),
     )
-    abstract = await extract_node_abstract(agent, children)
+    abstract = await extract_node_abstract(agents.for_height(height), children)
     await DataNodeAbstracts(conn).insert(user_id, node_id, abstract.model_dump())
     logger.info("node_extractor: node %s done", node_id)
     return True

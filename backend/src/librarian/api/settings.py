@@ -3,6 +3,7 @@ from pydantic import BaseModel, SecretStr
 from librarian.common.settings.base import YamlSettings
 from librarian.common.settings.google_oauth import GoogleOAuthSettings
 from librarian.common.settings.http_client import HttpClientSettings
+from librarian.common.settings.oauth_as import OAuthASSettings
 from librarian.common.settings.postgres import PostgresSettings
 
 
@@ -10,11 +11,21 @@ class ApiSettings(BaseModel):
     host: str = "localhost"
     port: int = 8000
     reload: bool = False
-    root_path: str = ""
     workers: int = 1
     cors_origins: list[str] = ["http://localhost:3000"]
     cors_headers: list[str] = ["Authorization"]
     cors_methods: list[str] = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+    # Trust `X-Forwarded-*` headers when behind a reverse proxy. Required
+    # for `request.url_for(...)` (and the absolute URLs we hand to Google
+    # / MCP clients) to come out with the right scheme+host when the
+    # process is reached through nginx. Off by default so a directly
+    # exposed dev server cannot be spoofed by header injection.
+    uvicorn_proxy_headers: bool = False
+    # Comma-separated list of IPs (or "*") whose forwarded headers we
+    # trust. Default matches uvicorn's own default — only the local
+    # reverse proxy.
+    uvicorn_forwarded_allow_ips: str = "127.0.0.1"
 
 
 class CookieSettings(BaseModel):
@@ -56,8 +67,9 @@ class QuerySettings(BaseModel):
     # "done" events are pushed eagerly; this only kicks in between them.
     sse_heartbeat_seconds: float = 15.0
 
-    # LLM model. Same "<provider>:<model>" shape as the other workers; today
-    # supports "anthropic:..." and "ollama:..." via service/llm.py.
+    # LLM model. Same "<provider>:<model>" shape as the other workers;
+    # today supports "anthropic:...", "openai:...", "xai:..." and
+    # "ollama:..." via service/llm.py.
     llm_model: str = "anthropic:claude-haiku-4-5"
     llm_output_retries: int = 3
 
@@ -68,7 +80,7 @@ class QuerySettings(BaseModel):
     # vector). Defaults to the same model as the retrieval agent, but kept
     # as its own field so an operator can point extraction at a cheaper or
     # local model (e.g. ollama:qwen-small) without touching retrieval.
-    # Reuses `anthropic_api_key` / `ollama_host` / `ollama_num_ctx` below.
+    # Reuses `llm_api_token` / `ollama_host` / `ollama_num_ctx` below.
     extract_llm_model: str = "anthropic:claude-haiku-4-5"
     extract_llm_output_retries: int = 3
 
@@ -86,35 +98,24 @@ class QuerySettings(BaseModel):
     embedding_chunk_chars: int = 4000
     embedding_chunk_chars_max: int = 5000
 
-    # Provider settings — only the one matching `llm_model`'s provider is
-    # required. Mirrors the BlobExtractorSettings shape. `voyage_api_key` is
-    # only required when `embedding_model` selects the voyageai provider.
-    anthropic_api_key: SecretStr | None = None
-    voyage_api_key: SecretStr | None = None
+    # API tokens — one per slot. `llm_api_token` covers both the
+    # retrieval agent's LLM and the pre-flight extraction LLM (the two
+    # share the same token in practice — same provider with different
+    # model sizes if anything). `embedder_api_token` covers the
+    # similarity-scoring embedder. Mirrors the BlobExtractorSettings
+    # shape. Either is unused for providers that need no auth (ollama).
+    # `embedder_api_token` is only required when `embedding_model`
+    # selects the voyageai provider.
+    llm_api_token: SecretStr | None = None
+    embedder_api_token: SecretStr | None = None
     ollama_host: str = "http://localhost:11434"
     ollama_num_ctx: int = 16384
 
     @property
-    def get_anthropic_api_key(self) -> str:
-        if self.anthropic_api_key is None:
-            raise ValueError("query.anthropic_api_key is not configured")
-        return self.anthropic_api_key.get_secret_value()
-
-    @property
-    def get_voyage_api_key(self) -> str:
-        if self.voyage_api_key is None:
-            raise ValueError("query.voyage_api_key is not configured")
-        return self.voyage_api_key.get_secret_value()
-
-
-class MCPSettings(BaseModel):
-    # TODO: replace with proper per-user auth once claude.ai supports an auth
-    # mechanism that works for us. Today the MCP endpoint is unauthenticated
-    # (intended to be reached only through a private remote reverse-proxy);
-    # every tool call runs as this configured user. Leaving this None makes
-    # the tool fail at call time with a clear "MCP user_id not configured"
-    # message rather than silently picking a user.
-    user_id: int | None = None
+    def get_embedder_api_token(self) -> str:
+        if self.embedder_api_token is None:
+            raise ValueError("query.embedder_api_token is not configured")
+        return self.embedder_api_token.get_secret_value()
 
 
 class Settings(YamlSettings):
@@ -125,7 +126,10 @@ class Settings(YamlSettings):
     google_oauth: GoogleOAuthSettings = GoogleOAuthSettings()
     data_files: DataFilesSettings = DataFilesSettings()
     query: QuerySettings = QuerySettings()
-    mcp: MCPSettings = MCPSettings()
+    # No default — the AS issuer URL has to be configured per environment
+    # (see OAuthASSettings.public_base_url). The MCP endpoint and the SDK
+    # auth routes will refuse to start without it.
+    oauth_as: OAuthASSettings
 
 
 settings = Settings()
