@@ -1,7 +1,7 @@
 from aiohttp import ClientSession
 from asyncpg.pool import PoolConnectionProxy
 
-from librarian.common.oauth.google.crypto import decrypt as decrypt_google_token
+from librarian.common.crypto.fernet import decrypt as decrypt_google_token
 from librarian.common.oauth.google.tokens import refresh_access_token
 from librarian.common.settings.google_oauth import GoogleOAuthSettings
 from librarian.db.tables.auth_google import AuthGoogle

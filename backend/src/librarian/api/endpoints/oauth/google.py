@@ -9,7 +9,7 @@ from librarian.api.core.auth.user import CurrentUser
 from librarian.api.db import DbConnection
 from librarian.api.http import HttpClient
 from librarian.api.settings import settings
-from librarian.common.oauth.google.crypto import encrypt as encrypt_google_token
+from librarian.common.crypto.fernet import encrypt as encrypt_google_token
 from librarian.common.oauth.google.tokens import (
     build_authorize_url,
     exchange_code,

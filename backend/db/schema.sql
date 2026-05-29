@@ -688,6 +688,70 @@ CREATE TABLE public.schema_migrations (
 
 
 --
+-- Name: user_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_settings (
+    user_id bigint NOT NULL,
+    models jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: user_slot_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_slot_tokens (
+    user_id bigint NOT NULL,
+    slot text NOT NULL,
+    token_enc bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_slot_tokens_slot_check CHECK ((slot = ANY (ARRAY['blob_llm'::text, 'node_llm_leaf'::text, 'node_llm_internal'::text, 'retrieval_llm'::text, 'extract_llm'::text, 'embedding'::text])))
+);
+
+
+--
+-- Name: user_token_usage; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_token_usage (
+    usage_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    operation text NOT NULL,
+    provider text NOT NULL,
+    model text NOT NULL,
+    input_tokens integer NOT NULL,
+    output_tokens integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_token_usage_input_tokens_check CHECK ((input_tokens >= 0)),
+    CONSTRAINT user_token_usage_operation_check CHECK ((operation = ANY (ARRAY['blob_extract'::text, 'blob_tag'::text, 'node_extract_leaf'::text, 'node_extract_internal'::text, 'retrieval'::text, 'extract_search_terms'::text, 'embed_blob'::text, 'embed_query'::text]))),
+    CONSTRAINT user_token_usage_output_tokens_check CHECK ((output_tokens >= 0))
+);
+
+
+--
+-- Name: user_token_usage_usage_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.user_token_usage_usage_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: user_token_usage_usage_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.user_token_usage_usage_id_seq OWNED BY public.user_token_usage.usage_id;
+
+
+--
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -765,6 +829,13 @@ ALTER TABLE ONLY public.data_node_weights ALTER COLUMN node_weight_id SET DEFAUL
 --
 
 ALTER TABLE ONLY public.data_nodes ALTER COLUMN node_id SET DEFAULT nextval('public.data_nodes_node_id_seq'::regclass);
+
+
+--
+-- Name: user_token_usage usage_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_token_usage ALTER COLUMN usage_id SET DEFAULT nextval('public.user_token_usage_usage_id_seq'::regclass);
 
 
 --
@@ -943,6 +1014,30 @@ ALTER TABLE ONLY public.schema_migrations
 
 
 --
+-- Name: user_settings user_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_settings
+    ADD CONSTRAINT user_settings_pkey PRIMARY KEY (user_id);
+
+
+--
+-- Name: user_slot_tokens user_slot_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_slot_tokens
+    ADD CONSTRAINT user_slot_tokens_pkey PRIMARY KEY (user_id, slot);
+
+
+--
+-- Name: user_token_usage user_token_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_token_usage
+    ADD CONSTRAINT user_token_usage_pkey PRIMARY KEY (usage_id);
+
+
+--
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1067,6 +1162,13 @@ CREATE INDEX idx_oauth_refresh_tokens_expires_at ON public.oauth_refresh_tokens 
 --
 
 CREATE INDEX idx_oauth_refresh_tokens_user_id ON public.oauth_refresh_tokens USING btree (user_id);
+
+
+--
+-- Name: idx_user_token_usage_user_id_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_user_token_usage_user_id_created_at ON public.user_token_usage USING btree (user_id, created_at DESC);
 
 
 --
@@ -1273,6 +1375,41 @@ CREATE TRIGGER oauth_refresh_tokens_prevent_created_at_change BEFORE UPDATE ON p
 
 
 --
+-- Name: user_settings user_settings_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER user_settings_prevent_created_at_change BEFORE UPDATE ON public.user_settings FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
+
+
+--
+-- Name: user_settings user_settings_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER user_settings_set_updated_at BEFORE UPDATE ON public.user_settings FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: user_slot_tokens user_slot_tokens_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER user_slot_tokens_prevent_created_at_change BEFORE UPDATE ON public.user_slot_tokens FOR EACH ROW EXECUTE FUNCTION public.prevent_created_at_change();
+
+
+--
+-- Name: user_slot_tokens user_slot_tokens_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER user_slot_tokens_set_updated_at BEFORE UPDATE ON public.user_slot_tokens FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: user_token_usage user_token_usage_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER user_token_usage_prevent_any_update BEFORE UPDATE ON public.user_token_usage FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
 -- Name: users users_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1471,6 +1608,30 @@ ALTER TABLE ONLY public.oauth_refresh_tokens
 
 
 --
+-- Name: user_settings user_settings_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_settings
+    ADD CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_slot_tokens user_slot_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_slot_tokens
+    ADD CONSTRAINT user_slot_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_token_usage user_token_usage_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_token_usage
+    ADD CONSTRAINT user_token_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- PostgreSQL database dump complete
 --
 
@@ -1490,4 +1651,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('202605180005'),
     ('202605180006'),
     ('202605180007'),
-    ('202605260001');
+    ('202605260001'),
+    ('202605290001');
