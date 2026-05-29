@@ -9,6 +9,7 @@ import {
 } from "@mantine/core";
 import { api } from "../api/client";
 import type { Me } from "../auth/use-auth";
+import SettingsPanel from "../settings/settings-panel";
 import SearchPanel from "./search-panel";
 import SyncPanel from "./sync-panel";
 import TreeExplorer from "./tree-explorer";
@@ -49,6 +50,7 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
             <Tabs.Tab value="sync">Sync</Tabs.Tab>
             <Tabs.Tab value="tree">Tree</Tabs.Tab>
             <Tabs.Tab value="search">Search</Tabs.Tab>
+            <Tabs.Tab value="settings">Settings</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="sync" pt="md">
             <SyncPanel />
@@ -58,6 +60,9 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
           </Tabs.Panel>
           <Tabs.Panel value="search" pt="md">
             <SearchPanel />
+          </Tabs.Panel>
+          <Tabs.Panel value="settings" pt="md">
+            <SettingsPanel />
           </Tabs.Panel>
         </Tabs>
       </Stack>
