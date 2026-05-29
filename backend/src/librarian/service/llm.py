@@ -19,10 +19,13 @@ def build_llm_model(
     caller should attach to the Agent (or pass to `agent.run`).
 
     `api_token` is the generic credential consumed by whichever provider
-    branch the model string selects. The caller keeps one token field
-    per LLM slot (`llm_api_token`) rather than one per provider, so the
-    settings shape doesn't change when the operator (or, later, the end
-    user via the UI) switches providers.
+    branch the model string selects. The caller resolves it from the
+    user's per-slot row in `user_slot_tokens` via
+    `librarian.service.credentials.resolve_user_credentials`, which
+    decrypts it just-in-time and hands a `ModelCreds` to the agent
+    builder. One token per slot rather than one per provider means the
+    `build_llm_model` signature doesn't change when the user switches
+    providers.
 
     Supported providers:
       * `anthropic`: requires `api_token`. When

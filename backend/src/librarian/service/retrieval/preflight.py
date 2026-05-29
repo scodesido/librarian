@@ -10,10 +10,9 @@ from numpy.typing import NDArray
 from librarian.api.settings import settings
 from librarian.db.readiness import PipelineCounts, count_user_pipeline
 from librarian.db.tree_children import fetch_node_row
-from librarian.service.retrieval.embed import (
-    build_query_embedder,
-    embed_search_terms,
-)
+from librarian.service.credentials import UserCredentials
+from librarian.service.embedder import build_embedder
+from librarian.service.retrieval.embed import embed_search_terms
 from librarian.service.retrieval.extract import (
     build_extractor_agent,
     extract_search_terms,
@@ -82,6 +81,7 @@ async def preflight_query(
     user_id: int,
     question: str,
     search_terms: str | None,
+    creds: UserCredentials,
 ) -> QueryPreflight:
     """Pre-flight gate: validates question/search_terms length and tree
     readiness, derives the effective search string (either an explicit
@@ -125,7 +125,7 @@ async def preflight_query(
         effective = search_terms
         extracted = False
     else:
-        extractor = build_extractor_agent(settings.query)
+        extractor = build_extractor_agent(settings.query, creds.extract_llm)
         result = await extract_search_terms(extractor, question)
         effective = result.terms
         extracted = True
@@ -136,13 +136,18 @@ async def preflight_query(
             result.rationale,
         )
 
-    embedder = build_query_embedder(settings.query)
+    embedder = build_embedder(
+        model=creds.embedding.model,
+        api_token=creds.embedding.api_token,
+        ollama_host=creds.embedding.ollama_host,
+        dimensions=settings.embeddings.dimensions,
+    )
     search_embedding = await embed_search_terms(
         http,
         embedder,
         effective,
-        settings.query.embedding_chunk_chars,
-        settings.query.embedding_chunk_chars_max,
+        settings.embeddings.chunk_chars,
+        settings.embeddings.chunk_chars_max,
     )
     return QueryPreflight(
         search_embedding=search_embedding,

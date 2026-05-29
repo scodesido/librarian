@@ -4,6 +4,8 @@ import numpy as np
 from aiohttp import ClientSession
 from numpy.typing import NDArray
 
+from librarian.common.settings.model_catalog import split_model
+
 
 def normalize_l2(vec: NDArray[np.float32]) -> NDArray[np.float32]:
     norm = float(np.linalg.norm(vec))
@@ -162,3 +164,32 @@ class VoyageEmbedder:
         # changes.
         ordered = sorted(data["data"], key=lambda d: d["index"])
         return [np.asarray(d["embedding"], dtype=np.float32) for d in ordered]
+
+
+def build_embedder(
+    model: str,
+    api_token: str | None,
+    ollama_host: str,
+    dimensions: int,
+) -> Embedder:
+    """Dispatch on the "<provider>:<model>" prefix in `model`. Two providers
+    are currently wired up: `ollama` (local daemon, no auth) and `voyageai`
+    (hosted, requires the user's token). Adding a new provider is a new
+    class above plus a branch here.
+
+    `api_token` is the decrypted per-user token for whichever provider
+    the model string selects; ignored for ollama, required for voyageai.
+    """
+    provider, model_name = split_model(model)
+    if provider == "ollama":
+        return OllamaEmbedder(host=ollama_host, model=model_name, dimensions=dimensions)
+    if provider == "voyageai":
+        if api_token is None:
+            raise ValueError("voyageai embedder requires api_token to be set")
+        return VoyageEmbedder(
+            api_key=api_token, model=model_name, dimensions=dimensions
+        )
+    raise ValueError(
+        f"Unsupported embedding provider '{provider}'. "
+        "Wire it up by adding a class above and a branch in build_embedder."
+    )

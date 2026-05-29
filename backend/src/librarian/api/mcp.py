@@ -28,6 +28,11 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
 from librarian.api.core.oauth.auth_server.provider import LibrarianAccessToken
+from librarian.api.settings import settings
+from librarian.service.credentials import (
+    MissingTokenError,
+    resolve_user_credentials,
+)
 from librarian.service.retrieval.events import (
     BlobResult,
     ExpandEvent,
@@ -237,12 +242,26 @@ async def query_library(
 
     async with deps.pool.acquire() as conn:
         try:
+            creds = await resolve_user_credentials(
+                conn,
+                user_id,
+                settings.model_catalog,
+                settings.ollama,
+                settings.user_tokens,
+            )
             preflight = await preflight_query(
-                deps.http, conn, user_id, question, search_terms
+                deps.http, conn, user_id, question, search_terms, creds
             )
             result = await run_retrieval(
-                conn, deps.http, user_id, question, preflight, emit
+                conn, deps.http, user_id, question, preflight, creds, emit
             )
+        except MissingTokenError as exc:
+            # MCP has no HTTP status; flatten to a tool error that names
+            # the broken slot so the calling LLM can tell the user.
+            raise ValueError(
+                f"retrieval needs an API token for slot {exc.slot!r} "
+                f"({exc.model!r}); please add it in Settings."
+            ) from exc
         except HTTPException as exc:
             # preflight + setup_query both raise HTTPException for the
             # readiness / auth / validation gates. The MCP wire format has

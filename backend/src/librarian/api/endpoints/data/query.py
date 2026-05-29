@@ -12,6 +12,11 @@ from librarian.api.core.auth.user import CurrentUser
 from librarian.api.db import DbConnection
 from librarian.api.http import HttpClient
 from librarian.api.settings import settings
+from librarian.service.credentials import (
+    MissingTokenError,
+    UserCredentials,
+    resolve_user_credentials,
+)
 from librarian.service.retrieval.events import (
     BlobResult,
     ErrorEvent,
@@ -52,6 +57,21 @@ class QueryResponse(BaseModel):
     effective_search_terms: str
 
 
+def missing_token_http(exc: MissingTokenError) -> HTTPException:
+    """Map MissingTokenError -> 409 with a message naming the broken slot.
+    409 mirrors the readiness-gate shape ("user's state isn't ready for
+    this request"), so the FE can render the same kind of inline
+    actionable message it already shows for tree-not-built.
+    """
+    return HTTPException(
+        status_code=409,
+        detail=(
+            f"Slot {exc.slot!r} is set to {exc.model!r}, which needs an API "
+            "token. Visit Settings to add it."
+        ),
+    )
+
+
 @router.post("", response_model=QueryResponse)
 async def query(
     user_id: CurrentUser,
@@ -63,12 +83,22 @@ async def query(
     the chosen blob_ids into a full response. Use `POST /data/query/stream`
     for incremental progress.
     """
+    try:
+        creds = await resolve_user_credentials(
+            conn,
+            user_id,
+            settings.model_catalog,
+            settings.ollama,
+            settings.user_tokens,
+        )
+    except MissingTokenError as exc:
+        raise missing_token_http(exc) from exc
     preflight = await preflight_query(
-        http, conn, user_id, body.question, body.search_terms
+        http, conn, user_id, body.question, body.search_terms, creds
     )
     try:
         result = await run_retrieval(
-            conn, http, user_id, body.question, preflight, emit=None
+            conn, http, user_id, body.question, preflight, creds, emit=None
         )
     except BudgetExceededError as exc:
         raise HTTPException(
@@ -90,6 +120,7 @@ async def query_event_stream(
     user_id: int,
     question: str,
     preflight: QueryPreflight,
+    creds: UserCredentials,
 ) -> AsyncIterator[bytes]:
     """Run the agent against its own pool connection (not the request-scoped
     one — the StreamingResponse generator outlives the request handler) and
@@ -109,7 +140,9 @@ async def query_event_stream(
 
         async def run() -> None:
             try:
-                await run_retrieval(conn, http, user_id, question, preflight, emit)
+                await run_retrieval(
+                    conn, http, user_id, question, preflight, creds, emit
+                )
             except BudgetExceededError as exc:
                 await queue.put(ErrorEvent(detail=f"Descent budget exhausted. {exc}"))
             except HTTPException as exc:
@@ -163,14 +196,24 @@ async def query_stream(
     409 / 404 surface as proper HTTP status codes — only mid-stream failures
     end up as `error` events on a 200 response.
     """
+    try:
+        creds = await resolve_user_credentials(
+            conn,
+            user_id,
+            settings.model_catalog,
+            settings.ollama,
+            settings.user_tokens,
+        )
+    except MissingTokenError as exc:
+        raise missing_token_http(exc) from exc
     preflight = await preflight_query(
-        http, conn, user_id, body.question, body.search_terms
+        http, conn, user_id, body.question, body.search_terms, creds
     )
     pool: Pool | None = request.app.state.db_connection_pool
     if pool is None:
         raise ValueError("No database connection pool available")
     return StreamingResponse(
-        query_event_stream(pool, http, user_id, body.question, preflight),
+        query_event_stream(pool, http, user_id, body.question, preflight, creds),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

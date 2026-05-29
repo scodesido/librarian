@@ -5,6 +5,7 @@ from typing import Any
 from pydantic_ai import Agent
 
 from librarian.service.abstract import Abstract, AbstractCore
+from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 from librarian.service.node_extractor.settings import NodeExtractorSettings
 
@@ -14,9 +15,9 @@ class NodeAgents:
     """Per-height agent pair. `leaf` runs on height-0 nodes (children
     are blob Abstracts), `internal` runs on height>0 nodes (children
     are node Abstracts, themselves already a synthesis — a more
-    capable model pays off here). Built once at worker startup and
-    threaded through the iteration; `process_one_node` picks which to
-    use based on the claimed node's height.
+    capable model pays off here). Built once per worker iteration and
+    threaded through `process_one_node`, which picks which to use
+    based on the claimed node's height.
 
     Plain dataclass (not Pydantic BaseModel): the fields are
     pydantic-ai `Agent` instances, which aren't a pydantic-validatable
@@ -35,7 +36,7 @@ class NodeAgents:
 
 def build_node_abstract_agent(
     settings: NodeExtractorSettings,
-    llm_model: str,
+    creds: ModelCreds,
 ) -> Agent[None, AbstractCore]:
     # Field *meanings* travel via the output schema (Field(description=...)
     # on AbstractCore). The instructions add what the schema can't:
@@ -81,16 +82,11 @@ def build_node_abstract_agent(
         "most representative across the group; leave the list empty if no "
         "such items appear in the children — do not invent or infer."
     )
-    api_token = (
-        settings.llm_api_token.get_secret_value()
-        if settings.llm_api_token is not None
-        else None
-    )
     model, model_settings = build_llm_model(
-        llm_model,
-        api_token=api_token,
-        ollama_host=settings.ollama_host,
-        ollama_num_ctx=settings.ollama_num_ctx,
+        creds.model,
+        api_token=creds.api_token,
+        ollama_host=creds.ollama_host,
+        ollama_num_ctx=creds.ollama_num_ctx,
     )
     return Agent(
         model,
@@ -98,18 +94,6 @@ def build_node_abstract_agent(
         instructions=instructions,
         model_settings=model_settings,
         retries=settings.llm_output_retries,
-    )
-
-
-def build_node_agents(settings: NodeExtractorSettings) -> NodeAgents:
-    """Build both the leaf-height and internal-height agents up-front,
-    so per-iteration cost is just `agent.run(...)` (no per-call agent
-    construction). The two agents share the same instructions and
-    output type; only the underlying model differs.
-    """
-    return NodeAgents(
-        leaf=build_node_abstract_agent(settings, settings.llm_model_leaf),
-        internal=build_node_abstract_agent(settings, settings.llm_model_internal),
     )
 
 

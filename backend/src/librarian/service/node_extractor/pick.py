@@ -4,8 +4,9 @@ from asyncpg.pool import PoolConnectionProxy
 async def pick_user_with_extractable_tree(
     conn: PoolConnectionProxy,
 ) -> int | None:
-    """Return the user_id of some user whose tree is "ready for extraction"
-    and who has at least one node without an abstract. None otherwise.
+    """Return the user_id of a random user whose tree is "ready for
+    extraction" and who has at least one node without an abstract. None
+    otherwise.
 
     "Ready for extraction" is a per-user gate at iteration start (per the
     spec in docs/04.immutable_data_pipeline.md):
@@ -18,6 +19,9 @@ async def pick_user_with_extractable_tree(
     shortly after by the edge-trigger cascade. The next iteration
     recomputes. We accept one wasted LLM call per disturbance in exchange
     for not serialising against tree_builder via a per-user advisory lock.
+
+    Random user picking spreads work across users so a single user with
+    broken credentials doesn't starve the queue — see blob_extractor/pick.py.
     """
     record = await conn.fetchrow(
         """
@@ -54,6 +58,7 @@ async def pick_user_with_extractable_tree(
                   WHERE a.node_id = n.node_id
               )
         )
+        ORDER BY random()
         LIMIT 1
         """
     )

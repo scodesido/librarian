@@ -9,6 +9,7 @@ from librarian.common.oauth.google.access import (
     NoGoogleAuthError,
     access_token_for_user,
 )
+from librarian.common.settings.embeddings import EmbeddingsSettings
 from librarian.common.settings.google_oauth import GoogleOAuthSettings
 from librarian.db.tables.data_files import DataFilesModel
 from librarian.service.abstract import BlobTags, RollingAbstract, RollingAbstractCore
@@ -118,6 +119,7 @@ async def process_file(
     tag_agent: Agent[None, BlobTags],
     embedder: Embedder,
     settings: BlobExtractorSettings,
+    embeddings_settings: EmbeddingsSettings,
     google_oauth_settings: GoogleOAuthSettings,
 ) -> None:
     """Process one file end-to-end inside an already-open transaction on
@@ -194,8 +196,8 @@ async def process_file(
         embedder,
         raw_texts=[c.raw_text for c in chunks],
         abstracts=abstracts,
-        chunk_chars=settings.embedding_chunk_chars,
-        chunk_chars_max=settings.embedding_chunk_chars_max,
+        chunk_chars=embeddings_settings.chunk_chars,
+        chunk_chars_max=embeddings_settings.chunk_chars_max,
     )
     embeddings_with_file = compute_with_file_embeddings(embedding_blobs)
 

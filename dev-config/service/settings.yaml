@@ -14,14 +14,66 @@ google_oauth:
 
 blob_extractor:
   concurrent_workers: 3
-
-  ollama_host: http://librarian-ollama:11434
-  llm_model: anthropic:claude-haiku-4-5
   llm_pdf_mode: binary
 
 node_extractor:
   concurrent_workers: 3
-  ollama_host: http://librarian-ollama:11434
 
 http_client:
   timeout: 900
+
+# Shared LLM/embedder runtime knobs. Mirrored in api settings.yaml —
+# both processes must see the same values for cross-process consistency.
+ollama:
+  host: http://librarian-ollama:11434
+  num_ctx: 16384
+
+embeddings:
+  # Must match the vector(N) column width in data_blobs (currently 1024).
+  dimensions: 1024
+
+user_tokens:
+  # Adhoc, dev-only Fernet key for per-user API tokens. Generate with:
+  #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  # In production this MUST differ from google_oauth.token_encryption_key
+  # so the two key materials can be rotated independently.
+  encryption_key: wgZBQVjvKb-CcdAemcprq8Dl7rs2J4eYrUkE7-uCmkY=
+
+# Operator-defined whitelist of allowed models per slot. Both api and
+# service load this from the same shape — keep the two YAMLs in sync.
+model_catalog:
+  blob_llm:
+    allowed:
+      - { model: "anthropic:claude-haiku-4-5", label: "Claude Haiku 4.5" }
+      - { model: "anthropic:claude-sonnet-4-5", label: "Claude Sonnet 4.5" }
+      - { model: "ollama:llama3.2:3b", label: "Llama 3.2 3B (local)" }
+    default: "anthropic:claude-haiku-4-5"
+  node_llm_leaf:
+    allowed:
+      - { model: "anthropic:claude-haiku-4-5", label: "Claude Haiku 4.5" }
+      - { model: "anthropic:claude-sonnet-4-5", label: "Claude Sonnet 4.5" }
+      - { model: "ollama:llama3.2:3b", label: "Llama 3.2 3B (local)" }
+    default: "anthropic:claude-haiku-4-5"
+  node_llm_internal:
+    allowed:
+      - { model: "anthropic:claude-haiku-4-5", label: "Claude Haiku 4.5" }
+      - { model: "anthropic:claude-sonnet-4-5", label: "Claude Sonnet 4.5" }
+      - { model: "ollama:llama3.2:3b", label: "Llama 3.2 3B (local)" }
+    default: "anthropic:claude-sonnet-4-5"
+  retrieval_llm:
+    allowed:
+      - { model: "anthropic:claude-haiku-4-5", label: "Claude Haiku 4.5" }
+      - { model: "anthropic:claude-sonnet-4-5", label: "Claude Sonnet 4.5" }
+      - { model: "ollama:llama3.2:3b", label: "Llama 3.2 3B (local)" }
+    default: "anthropic:claude-haiku-4-5"
+  extract_llm:
+    allowed:
+      - { model: "anthropic:claude-haiku-4-5", label: "Claude Haiku 4.5" }
+      - { model: "ollama:llama3.2:3b", label: "Llama 3.2 3B (local)" }
+    default: "anthropic:claude-haiku-4-5"
+  embedding:
+    allowed:
+      - { model: "ollama:qwen3-embedding:0.6b", label: "Qwen3 Embedding 0.6B (local)" }
+      - { model: "voyageai:voyage-3.5", label: "Voyage 3.5" }
+      - { model: "voyageai:voyage-3-large", label: "Voyage 3 Large" }
+    default: "ollama:qwen3-embedding:0.6b"

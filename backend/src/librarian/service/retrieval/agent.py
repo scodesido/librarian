@@ -14,6 +14,7 @@ from librarian.db.tree_children import (
     fetch_children_scored,
     fetch_node_abstract,
 )
+from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 from librarian.service.retrieval.deps import QueryDeps
 from librarian.service.retrieval.tools import (
@@ -166,22 +167,19 @@ def build_instructions(
 
 
 def build_query_agent(
-    settings: QuerySettings, instructions: str
+    settings: QuerySettings,
+    creds: ModelCreds,
+    instructions: str,
 ) -> Agent[QueryDeps, FinalAnswer]:
     """Build the per-request pydantic-ai Agent. Caching of the instructions
     block is requested via `cache_instructions=True`; the LLM builder turns
     that into provider-specific settings (Anthropic: yes, Ollama: ignored).
     """
-    api_token = (
-        settings.llm_api_token.get_secret_value()
-        if settings.llm_api_token is not None
-        else None
-    )
     model, model_settings = build_llm_model(
-        settings.llm_model,
-        api_token=api_token,
-        ollama_host=settings.ollama_host,
-        ollama_num_ctx=settings.ollama_num_ctx,
+        creds.model,
+        api_token=creds.api_token,
+        ollama_host=creds.ollama_host,
+        ollama_num_ctx=creds.ollama_num_ctx,
         cache_instructions=True,
     )
     agent: Agent[QueryDeps, FinalAnswer] = Agent(

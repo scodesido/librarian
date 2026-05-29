@@ -2,11 +2,13 @@ from pydantic_ai import Agent, BinaryContent
 
 from librarian.service.abstract import RollingAbstractCore
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
+from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 
 
 def build_main_agent(
     settings: BlobExtractorSettings,
+    creds: ModelCreds,
 ) -> Agent[None, RollingAbstractCore]:
     # Field *meanings* travel via the output schema (Field(description=...)
     # on RollingAbstractCore via AbstractCore). The instructions add
@@ -27,20 +29,11 @@ def build_main_agent(
         "content. Leave the list empty if no such items are explicitly "
         "mentioned — do not invent or infer."
     )
-    # Pass both provider knobs unconditionally; build_llm_model picks the
-    # one its provider branch needs and raises if it's missing. This lets
-    # the user flip llm_model between "anthropic:...", "openai:...",
-    # "xai:..." and "ollama:..." in settings without code changes.
-    api_token = (
-        settings.llm_api_token.get_secret_value()
-        if settings.llm_api_token is not None
-        else None
-    )
     model, model_settings = build_llm_model(
-        settings.llm_model,
-        api_token=api_token,
-        ollama_host=settings.ollama_host,
-        ollama_num_ctx=settings.ollama_num_ctx,
+        creds.model,
+        api_token=creds.api_token,
+        ollama_host=creds.ollama_host,
+        ollama_num_ctx=creds.ollama_num_ctx,
     )
     return Agent(
         model,

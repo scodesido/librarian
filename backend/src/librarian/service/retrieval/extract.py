@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from librarian.api.settings import QuerySettings
+from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 
 
@@ -53,22 +54,22 @@ EXTRACT_INSTRUCTIONS = (
 )
 
 
-def build_extractor_agent(settings: QuerySettings) -> Agent[None, ExtractedTerms]:
+def build_extractor_agent(
+    settings: QuerySettings,
+    creds: ModelCreds,
+) -> Agent[None, ExtractedTerms]:
     """Per-request pydantic-ai Agent for the pre-flight extraction step.
     No tools, no deps — it's a one-shot input -> structured output call.
-    Same provider plumbing as the retrieval agent so a single set of LLM
-    credentials covers both.
+    Same per-user credential plumbing as the retrieval agent; the two
+    just consume different slots (`extract_llm` vs `retrieval_llm`),
+    typically pointing at the same provider so the user's one Anthropic
+    key covers both.
     """
-    api_token = (
-        settings.llm_api_token.get_secret_value()
-        if settings.llm_api_token is not None
-        else None
-    )
     model, model_settings = build_llm_model(
-        settings.extract_llm_model,
-        api_token=api_token,
-        ollama_host=settings.ollama_host,
-        ollama_num_ctx=settings.ollama_num_ctx,
+        creds.model,
+        api_token=creds.api_token,
+        ollama_host=creds.ollama_host,
+        ollama_num_ctx=creds.ollama_num_ctx,
         cache_instructions=True,
     )
     agent: Agent[None, ExtractedTerms] = Agent(

@@ -1,8 +1,6 @@
 from asyncpg.pool import PoolConnectionProxy
 from pydantic import BaseModel
 
-from librarian.db.tables.data_files import SELECT_COLUMNS, DataFilesModel
-
 
 class PipelineCounts(BaseModel):
     files_total: int
@@ -12,25 +10,6 @@ class PipelineCounts(BaseModel):
     nodes_total: int
     nodes_weighted: int
     nodes_abstracted: int
-
-
-async def claim_next_unready_file(
-    conn: PoolConnectionProxy,
-) -> DataFilesModel | None:
-    record = await conn.fetchrow(
-        (
-            f"SELECT {SELECT_COLUMNS} FROM data_files f "
-            "WHERE f.type IN ('PDF', 'TEXT') "
-            "  AND NOT EXISTS ("
-            "    SELECT 1 FROM data_blobs b "
-            "    WHERE b.file_id = f.file_id AND b.is_final_blob"
-            "  ) "
-            "ORDER BY f.created_at "
-            "LIMIT 1 "
-            "FOR UPDATE SKIP LOCKED"
-        ),
-    )
-    return DataFilesModel.from_record(record)
 
 
 async def count_user_pipeline(

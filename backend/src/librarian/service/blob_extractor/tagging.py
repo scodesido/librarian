@@ -2,11 +2,13 @@ from pydantic_ai import Agent
 
 from librarian.service.abstract import BlobTags, RollingAbstractCore
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
+from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 
 
 def build_tag_agent(
     settings: BlobExtractorSettings,
+    creds: ModelCreds,
 ) -> Agent[None, BlobTags]:
     """Dedicated classifier for a blob's `content_tags` / `format_tags`.
 
@@ -21,6 +23,12 @@ def build_tag_agent(
     `service/abstract.py`. The LLM literally cannot return `[]` or an
     out-of-vocab string — failures feed `pydantic-ai`'s retry loop,
     but in practice the schema constraints make retries exceptional.
+
+    Shares the blob_llm slot with the main agent — same model, same
+    token. A dedicated classifier slot was considered and rejected: the
+    tag step is cheap and the two agents benefit from prompt-cache
+    sharing on identical instructions when both run against the same
+    provider in the same iteration.
     """
     instructions = (
         "You are given a brief description of a document blob — its "
@@ -36,16 +44,11 @@ def build_tag_agent(
         "Both facets REQUIRE at least one tag — the schema enforces "
         "this. The allowed values appear in the output schema as enums."
     )
-    api_token = (
-        settings.llm_api_token.get_secret_value()
-        if settings.llm_api_token is not None
-        else None
-    )
     model, model_settings = build_llm_model(
-        settings.llm_model,
-        api_token=api_token,
-        ollama_host=settings.ollama_host,
-        ollama_num_ctx=settings.ollama_num_ctx,
+        creds.model,
+        api_token=creds.api_token,
+        ollama_host=creds.ollama_host,
+        ollama_num_ctx=creds.ollama_num_ctx,
     )
     return Agent(
         model,

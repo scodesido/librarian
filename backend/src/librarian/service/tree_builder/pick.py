@@ -2,8 +2,8 @@ from asyncpg.pool import PoolConnectionProxy
 
 
 async def pick_user_with_work(conn: PoolConnectionProxy, k: int) -> int | None:
-    """Return the user_id of some user with tree_builder work pending, or
-    None if everyone is settled.
+    """Return the user_id of a random user with tree_builder work pending,
+    or None if everyone is settled.
 
     Work means at least one of:
       * a data_nodes row without a matching data_node_weights row (weight
@@ -14,8 +14,9 @@ async def pick_user_with_work(conn: PoolConnectionProxy, k: int) -> int | None:
       * a data_blobs row whose file is ready (has is_final_blob=TRUE) and
         which lacks a data_blob_edges row (insertion pending).
 
-    We don't try to be fair across users; any user with any signal is
-    acceptable. The advisory lock the worker takes after this query
+    Random user picking spreads work across users so the union-all
+    candidate set doesn't lean toward whichever user happens to have the
+    earliest row. The advisory lock the worker takes after this query
     serialises per-user concurrent work.
     """
     record = await conn.fetchrow(
@@ -46,6 +47,7 @@ async def pick_user_with_work(conn: PoolConnectionProxy, k: int) -> int | None:
                 WHERE bf.file_id = b.file_id AND bf.is_final_blob
             )
         ) AS work
+        ORDER BY random()
         LIMIT 1
         """,
         k,

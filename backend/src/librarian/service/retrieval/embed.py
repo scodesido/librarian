@@ -2,40 +2,11 @@ import numpy as np
 from aiohttp import ClientSession
 from numpy.typing import NDArray
 
-from librarian.api.settings import QuerySettings
 from librarian.service.embedder import (
     Embedder,
-    OllamaEmbedder,
-    VoyageEmbedder,
     chunk_for_embedding,
     normalize_l2,
 )
-
-
-def build_query_embedder(settings: QuerySettings) -> Embedder:
-    """Dispatch on the "<provider>:<model>" prefix in
-    settings.embedding_model. Same two providers as blob_extractor's
-    builder; kept separate so the API can be configured independently
-    in YAML (and so the QuerySettings surface doesn't depend on the
-    blob_extractor module).
-    """
-    provider_name, model_name = settings.embedding_model.split(":", 1)
-    if provider_name == "ollama":
-        return OllamaEmbedder(
-            host=settings.ollama_host,
-            model=model_name,
-            dimensions=settings.embedding_dimensions,
-        )
-    if provider_name == "voyageai":
-        return VoyageEmbedder(
-            api_key=settings.get_embedder_api_token,
-            model=model_name,
-            dimensions=settings.embedding_dimensions,
-        )
-    raise ValueError(
-        f"Unsupported embedding provider '{provider_name}'. "
-        "Wire it up in service/embedder.py and add a branch in build_query_embedder."
-    )
 
 
 async def embed_search_terms(

@@ -15,6 +15,7 @@ from librarian.db.tree_children import (
     fetch_node_row,
     parse_blob_ref,
 )
+from librarian.service.credentials import UserCredentials
 from librarian.service.retrieval.agent import (
     build_instructions,
     build_query_agent,
@@ -144,6 +145,7 @@ async def run_retrieval(
     user_id: int,
     question: str,
     preflight: QueryPreflight,
+    creds: UserCredentials,
     emit: Emit | None,
 ) -> RetrievalResult:
     """Shared retrieval driver: set up per-request state on `conn`, run the
@@ -176,7 +178,7 @@ async def run_retrieval(
             )
         )
 
-    agent = build_query_agent(settings.query, instructions)
+    agent = build_query_agent(settings.query, creds.retrieval_llm, instructions)
     result = await agent.run(question, deps=deps)
     final = result.output
     blob_ids = cap_blob_ids(
