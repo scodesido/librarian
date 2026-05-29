@@ -8,6 +8,7 @@ from librarian.service.abstract import Abstract, AbstractCore
 from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 from librarian.service.node_extractor.settings import NodeExtractorSettings
+from librarian.service.usage import TokenUsage, agent_usage
 
 
 @dataclass(frozen=True)
@@ -100,8 +101,8 @@ def build_node_abstract_agent(
 async def extract_node_abstract(
     agent: Agent[None, AbstractCore],
     children_abstracts: list[dict[str, Any]],
-) -> Abstract:
-    """Produce a node-level Abstract.
+) -> tuple[Abstract, TokenUsage]:
+    """Produce a node-level Abstract plus the call's token usage.
 
     The LLM produces an `AbstractCore` (no tags in the schema, so the
     model never has to reason about them). The caller computes the
@@ -126,10 +127,11 @@ async def extract_node_abstract(
     for child in children_abstracts:
         content_union.update(child.get("content_tags", []))
         format_union.update(child.get("format_tags", []))
-    return Abstract.model_validate(
+    abstract = Abstract.model_validate(
         {
             **core.model_dump(),
             "content_tags": sorted(content_union),
             "format_tags": sorted(format_union),
         }
     )
+    return abstract, agent_usage(result)

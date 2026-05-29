@@ -32,6 +32,7 @@ from librarian.service.retrieval.events import (
 from librarian.service.retrieval.preflight import QueryPreflight
 from librarian.service.retrieval.providers import build_blob_provider
 from librarian.service.retrieval.tools import resolve_blob_results
+from librarian.service.usage import agent_usage, record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,13 @@ async def run_retrieval(
 
     agent = build_query_agent(settings.query, creds.retrieval_llm, instructions)
     result = await agent.run(question, deps=deps)
+    await record_usage(
+        conn,
+        user_id,
+        "retrieval",
+        creds.retrieval_llm.model,
+        agent_usage(result),
+    )
     final = result.output
     blob_ids = cap_blob_ids(
         parse_final_blob_refs(final.blob_refs), settings.query.max_returned_blobs

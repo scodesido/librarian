@@ -4,6 +4,7 @@ from pydantic_ai import Agent
 from librarian.api.settings import QuerySettings
 from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
+from librarian.service.usage import TokenUsage, agent_usage
 
 
 class ExtractedTerms(BaseModel):
@@ -84,9 +85,10 @@ def build_extractor_agent(
 
 async def extract_search_terms(
     agent: Agent[None, ExtractedTerms], question: str
-) -> ExtractedTerms:
-    """One-shot call. Returns the structured output verbatim; the caller
-    decides what to do with `rationale` (logs, FE, or discard).
+) -> tuple[ExtractedTerms, TokenUsage]:
+    """One-shot call. Returns the structured output plus the call's
+    input/output token counts; the caller decides what to do with
+    `rationale` (logs, FE, or discard) and writes one usage row.
     """
     result = await agent.run(question)
-    return result.output
+    return result.output, agent_usage(result)

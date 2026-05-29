@@ -4,7 +4,9 @@ from typing import Any
 from asyncpg.pool import PoolConnectionProxy
 
 from librarian.db.tables.data_node_abstracts import DataNodeAbstracts
+from librarian.db.tables.user_token_usage import Operation
 from librarian.service.node_extractor.abstract import NodeAgents, extract_node_abstract
+from librarian.service.usage import record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +94,17 @@ async def process_one_node(
     conn: PoolConnectionProxy,
     agents: NodeAgents,
     user_id: int,
+    leaf_model: str,
+    internal_model: str,
 ) -> bool:
     """Claim, compute, insert. Returns True iff a node was processed.
 
     `agents` carries a per-height agent pair; the claimed node's height
     selects which one runs (haiku-class at height 0, sonnet-class above,
-    by default — see NodeExtractorSettings).
+    by default — see NodeExtractorSettings). `leaf_model` / `internal_model`
+    are the resolved "<provider>:<model>" strings used to build those
+    agents; we use them verbatim for the usage ledger row so historical
+    entries survive catalog edits.
     """
     claimed = await claim_next_extractable_node(conn, user_id)
     if claimed is None:
@@ -116,7 +123,12 @@ async def process_one_node(
         height,
         len(children),
     )
-    abstract = await extract_node_abstract(agents.for_height(height), children)
+    abstract, usage = await extract_node_abstract(agents.for_height(height), children)
+    operation: Operation = (
+        "node_extract_leaf" if height == 0 else "node_extract_internal"
+    )
+    model_used = leaf_model if height == 0 else internal_model
+    await record_usage(conn, user_id, operation, model_used, usage)
     await DataNodeAbstracts(conn).insert(user_id, node_id, abstract.model_dump())
     logger.info("node_extractor: node %s done", node_id)
     return True

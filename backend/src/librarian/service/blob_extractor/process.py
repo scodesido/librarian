@@ -29,6 +29,7 @@ from librarian.service.blob_extractor.pdf_text import extract_pdf_text
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
 from librarian.service.blob_extractor.tagging import classify_tags
 from librarian.service.embedder import Embedder
+from librarian.service.usage import TokenUsage, record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,8 @@ async def process_file(
     main_agent: Agent[None, RollingAbstractCore],
     tag_agent: Agent[None, BlobTags],
     embedder: Embedder,
+    blob_llm_model: str,
+    embedding_model: str,
     settings: BlobExtractorSettings,
     embeddings_settings: EmbeddingsSettings,
     google_oauth_settings: GoogleOAuthSettings,
@@ -126,10 +129,16 @@ async def process_file(
     `conn`. The caller holds the file-row FOR UPDATE and the
     per-(user, file) advisory_xact_lock; on return the caller commits.
 
+    `blob_llm_model` and `embedding_model` are the "<provider>:<model>"
+    strings the caller resolved through the user's credentials — they're
+    needed verbatim for the usage ledger rows so historical entries
+    survive catalog edits.
+
     Note: the LLM, Drive, and embedder calls all happen with the transaction
     open. The pool connection is pinned for the duration. This is by design
     (see docs/05.blob_extractor.md): atomicity of the file's blob set is
-    worth the long lease on the connection.
+    worth the long lease on the connection. Usage ledger rows are written
+    on the same conn so a rollback unwinds them with the rest of the work.
     """
     try:
         access_token = await access_token_for_user(
@@ -165,8 +174,14 @@ async def process_file(
     n_chunks = len(chunks)
     for i, chunk in enumerate(chunks):
         content_parts = build_llm_content_parts(chunk, settings.llm_pdf_mode)
-        core = await extract_main(main_agent, content_parts, previous_running)
-        tags = await classify_tags(tag_agent, core)
+        core, main_usage = await extract_main(
+            main_agent, content_parts, previous_running
+        )
+        await record_usage(
+            conn, file.user_id, "blob_extract", blob_llm_model, main_usage
+        )
+        tags, tag_usage = await classify_tags(tag_agent, core)
+        await record_usage(conn, file.user_id, "blob_tag", blob_llm_model, tag_usage)
         # Assemble the final RollingAbstract. model_validate re-runs the
         # ≥1-per-facet validator from Abstract; the Literal + min_length
         # constraints on RollingAbstract's tag fields catch any drift
@@ -191,13 +206,22 @@ async def process_file(
             abstract.format_tags,
         )
 
-    embedding_blobs = await embed_blobs(
+    embedding_blobs, embed_input_tokens = await embed_blobs(
         http,
         embedder,
         raw_texts=[c.raw_text for c in chunks],
         abstracts=abstracts,
         chunk_chars=embeddings_settings.chunk_chars,
         chunk_chars_max=embeddings_settings.chunk_chars_max,
+    )
+    # One ledger row for the entire batched embedder call. Embedders
+    # don't have an "output tokens" notion; output_tokens=0 by convention.
+    await record_usage(
+        conn,
+        file.user_id,
+        "embed_blob",
+        embedding_model,
+        TokenUsage(input_tokens=embed_input_tokens, output_tokens=0),
     )
     embeddings_with_file = compute_with_file_embeddings(embedding_blobs)
 

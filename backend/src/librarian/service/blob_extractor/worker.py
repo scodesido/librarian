@@ -115,6 +115,8 @@ async def run_one_iteration(pool: Pool, http: ClientSession) -> bool:
                 main_agent=main_agent,
                 tag_agent=tag_agent,
                 embedder=embedder,
+                blob_llm_model=creds.blob_llm.model,
+                embedding_model=creds.embedding.model,
                 settings=s,
                 embeddings_settings=settings.embeddings,
                 google_oauth_settings=settings.google_oauth,

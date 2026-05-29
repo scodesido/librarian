@@ -74,7 +74,13 @@ async def run_one_iteration(pool: Pool) -> bool:
                 leaf=build_node_abstract_agent(s, creds.node_llm_leaf),
                 internal=build_node_abstract_agent(s, creds.node_llm_internal),
             )
-            return await process_one_node(conn, agents, user_id)
+            return await process_one_node(
+                conn,
+                agents,
+                user_id,
+                leaf_model=creds.node_llm_leaf.model,
+                internal_model=creds.node_llm_internal.model,
+            )
 
 
 async def run_worker() -> None:

@@ -4,6 +4,7 @@ from librarian.service.abstract import RollingAbstractCore
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
 from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
+from librarian.service.usage import TokenUsage, agent_usage
 
 
 def build_main_agent(
@@ -48,13 +49,14 @@ async def extract_main(
     agent: Agent[None, RollingAbstractCore],
     content_parts: list[str | BinaryContent],
     previous_running_summary: str | None,
-) -> RollingAbstractCore:
+) -> tuple[RollingAbstractCore, TokenUsage]:
     """Run the main blob agent with a previous-running-summary header
     and a caller-built `content_parts` list. The list can carry any mix
     of strings (text) and BinaryContent (PDF bytes, page images, ...);
     the caller decides what shape matches the configured
-    `llm_pdf_mode`. Returns the synthesized core fields; tags are
-    classified separately by `service.blob_extractor.tagging`.
+    `llm_pdf_mode`. Returns the synthesized core fields plus the call's
+    input/output token counts so the caller can record one usage row;
+    tags are classified separately by `service.blob_extractor.tagging`.
     """
     parts: list[str | BinaryContent] = []
     if previous_running_summary is None:
@@ -67,4 +69,4 @@ async def extract_main(
         parts.append(f"Previous running summary:\n{previous_running_summary}")
     parts.extend(content_parts)
     result = await agent.run(parts)
-    return result.output
+    return result.output, agent_usage(result)

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
@@ -5,6 +6,19 @@ from aiohttp import ClientSession
 from numpy.typing import NDArray
 
 from librarian.common.settings.model_catalog import split_model
+
+
+@dataclass(frozen=True)
+class EmbedResult:
+    """What an `Embedder.embed_documents` call returns: one vector per
+    input plus the provider-reported input token count (0 if the
+    provider doesn't surface one). The token count flows into the
+    usage ledger; callers that only care about the vectors can read
+    `.vectors` and ignore `.input_tokens`.
+    """
+
+    vectors: list[NDArray[np.float32]]
+    input_tokens: int
 
 
 def normalize_l2(vec: NDArray[np.float32]) -> NDArray[np.float32]:
@@ -93,7 +107,7 @@ class Embedder(Protocol):
 
     async def embed_documents(
         self, http: ClientSession, inputs: list[str]
-    ) -> list[NDArray[np.float32]]: ...
+    ) -> EmbedResult: ...
 
 
 class OllamaEmbedder:
@@ -114,7 +128,7 @@ class OllamaEmbedder:
 
     async def embed_documents(
         self, http: ClientSession, inputs: list[str]
-    ) -> list[NDArray[np.float32]]:
+    ) -> EmbedResult:
         async with http.post(
             f"{self.host}/api/embed",
             json={
@@ -125,7 +139,13 @@ class OllamaEmbedder:
         ) as resp:
             resp.raise_for_status()
             data = await resp.json()
-        return [np.asarray(e, dtype=np.float32) for e in data["embeddings"]]
+        # Ollama returns `prompt_eval_count` summed across the batch.
+        # Missing on some model/version combinations; coerce to 0 so the
+        # ledger row stays valid against the non-negative CHECK.
+        return EmbedResult(
+            vectors=[np.asarray(e, dtype=np.float32) for e in data["embeddings"]],
+            input_tokens=int(data.get("prompt_eval_count", 0) or 0),
+        )
 
 
 class VoyageEmbedder:
@@ -146,7 +166,7 @@ class VoyageEmbedder:
 
     async def embed_documents(
         self, http: ClientSession, inputs: list[str]
-    ) -> list[NDArray[np.float32]]:
+    ) -> EmbedResult:
         async with http.post(
             "https://api.voyageai.com/v1/embeddings",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -161,9 +181,13 @@ class VoyageEmbedder:
             data = await resp.json()
         # Voyage returns objects with an `index` field; the API guarantees
         # them in input order, but sort defensively in case that ever
-        # changes.
+        # changes. `usage.total_tokens` is the batched input token count.
         ordered = sorted(data["data"], key=lambda d: d["index"])
-        return [np.asarray(d["embedding"], dtype=np.float32) for d in ordered]
+        usage = data.get("usage") or {}
+        return EmbedResult(
+            vectors=[np.asarray(d["embedding"], dtype=np.float32) for d in ordered],
+            input_tokens=int(usage.get("total_tokens", 0) or 0),
+        )
 
 
 def build_embedder(

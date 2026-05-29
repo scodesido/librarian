@@ -4,6 +4,7 @@ from librarian.service.abstract import BlobTags, RollingAbstractCore
 from librarian.service.blob_extractor.settings import BlobExtractorSettings
 from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
+from librarian.service.usage import TokenUsage, agent_usage
 
 
 def build_tag_agent(
@@ -62,8 +63,11 @@ def build_tag_agent(
 async def classify_tags(
     agent: Agent[None, BlobTags],
     core: RollingAbstractCore,
-) -> BlobTags:
-    """Classify a blob's tags from the main agent's compact output."""
+) -> tuple[BlobTags, TokenUsage]:
+    """Classify a blob's tags from the main agent's compact output.
+    Returns the tags plus the call's input/output token counts so the
+    caller can record one usage row.
+    """
     prompt = (
         f"Title: {core.title}\n\n"
         f"Summary: {core.summary}\n\n"
@@ -73,4 +77,4 @@ async def classify_tags(
         "(genre/form)."
     )
     result = await agent.run([prompt])
-    return result.output
+    return result.output, agent_usage(result)

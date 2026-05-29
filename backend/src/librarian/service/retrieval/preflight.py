@@ -17,6 +17,7 @@ from librarian.service.retrieval.extract import (
     build_extractor_agent,
     extract_search_terms,
 )
+from librarian.service.usage import TokenUsage, record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +127,16 @@ async def preflight_query(
         extracted = False
     else:
         extractor = build_extractor_agent(settings.query, creds.extract_llm)
-        result = await extract_search_terms(extractor, question)
+        result, extract_usage = await extract_search_terms(extractor, question)
         effective = result.terms
         extracted = True
+        await record_usage(
+            conn,
+            user_id,
+            "extract_search_terms",
+            creds.extract_llm.model,
+            extract_usage,
+        )
         logger.info(
             "retrieval: user %s extracted search terms %r (rationale: %s)",
             user_id,
@@ -142,12 +150,19 @@ async def preflight_query(
         ollama_host=creds.embedding.ollama_host,
         dimensions=settings.embeddings.dimensions,
     )
-    search_embedding = await embed_search_terms(
+    search_embedding, embed_input_tokens = await embed_search_terms(
         http,
         embedder,
         effective,
         settings.embeddings.chunk_chars,
         settings.embeddings.chunk_chars_max,
+    )
+    await record_usage(
+        conn,
+        user_id,
+        "embed_query",
+        creds.embedding.model,
+        TokenUsage(input_tokens=embed_input_tokens, output_tokens=0),
     )
     return QueryPreflight(
         search_embedding=search_embedding,

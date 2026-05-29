@@ -46,8 +46,11 @@ async def embed_blobs(
     abstracts: list[RollingAbstract],
     chunk_chars: int,
     chunk_chars_max: int,
-) -> list[NDArray[np.float32]]:
-    """Returns one L2-unit vector per (raw_text, abstract) pair.
+) -> tuple[list[NDArray[np.float32]], int]:
+    """Returns `(vectors, input_tokens)`: one L2-unit vector per
+    (raw_text, abstract) pair, plus the total input-token count
+    reported by the embedder for the batched call (0 if the provider
+    doesn't surface one).
 
     For each blob the raw text and the serialized abstract are embedded
     as two independent streams: each stream is split into sub-chunks
@@ -72,7 +75,7 @@ async def embed_blobs(
             "must have the same length"
         )
     if not raw_texts:
-        return []
+        return [], 0
     abstract_texts = [serialize_abstract_for_embed(a) for a in abstracts]
     # Track each sub-chunk's origin as (blob_idx, kind) where kind is
     # "raw" or "abstract". Empty/whitespace raw streams are skipped so
@@ -95,10 +98,10 @@ async def embed_blobs(
         for c in chunk_for_embedding(abs_text, chunk_chars, chunk_chars_max):
             all_chunks.append(c)
             origin.append((i, "abstract"))
-    embeddings = await embedder.embed_documents(http, all_chunks)
+    embed_result = await embedder.embed_documents(http, all_chunks)
     raw_groups: list[list[NDArray[np.float32]]] = [[] for _ in raw_texts]
     abs_groups: list[list[NDArray[np.float32]]] = [[] for _ in raw_texts]
-    for (i, kind), vec in zip(origin, embeddings, strict=True):
+    for (i, kind), vec in zip(origin, embed_result.vectors, strict=True):
         (raw_groups if kind == "raw" else abs_groups)[i].append(vec)
     result: list[NDArray[np.float32]] = []
     for raw_g, abs_g in zip(raw_groups, abs_groups, strict=True):
@@ -108,7 +111,7 @@ async def embed_blobs(
             continue
         raw_vec = normalize_l2(np.mean(np.stack(raw_g), axis=0).astype(np.float32))
         result.append(normalize_l2((raw_vec + abs_vec).astype(np.float32)))
-    return result
+    return result, embed_result.input_tokens
 
 
 def compute_with_file_embeddings(
