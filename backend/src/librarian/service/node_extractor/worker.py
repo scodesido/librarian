@@ -4,11 +4,13 @@ import logging
 from asyncpg import Pool
 
 from librarian.db.connect import open_pool
+from librarian.db.tables.user_worker_events import EventCode
 from librarian.service.backoff import ExponentialBackoff
 from librarian.service.credentials import (
     MissingTokenError,
     resolve_user_credentials,
 )
+from librarian.service.events import record_event, record_failure
 from librarian.service.node_extractor.abstract import (
     NodeAgents,
     build_node_abstract_agent,
@@ -69,18 +71,36 @@ async def run_one_iteration(pool: Pool) -> bool:
                 )
             except MissingTokenError as exc:
                 logger.info("node_extractor: user %s skipped (%s)", user_id, exc)
+                await record_event(
+                    conn,
+                    user_id,
+                    EventCode.MISSING_TOKEN,
+                    "node_extractor",
+                    detail=str(exc),
+                    context={"slot": exc.slot, "model": exc.model},
+                    throttle_window=s.event_throttle_seconds,
+                )
                 return False
             agents = NodeAgents(
                 leaf=build_node_abstract_agent(s, creds.node_llm_leaf),
                 internal=build_node_abstract_agent(s, creds.node_llm_internal),
             )
-            return await process_one_node(
-                conn,
-                agents,
-                user_id,
-                leaf_model=creds.node_llm_leaf.model,
-                internal_model=creds.node_llm_internal.model,
-            )
+            try:
+                return await process_one_node(
+                    conn,
+                    agents,
+                    user_id,
+                    leaf_model=creds.node_llm_leaf.model,
+                    internal_model=creds.node_llm_internal.model,
+                    event_throttle_seconds=s.event_throttle_seconds,
+                )
+            except Exception as exc:
+                # Record on a fresh connection (the work txn is rolling
+                # back), then re-raise to keep worker_loop's backoff.
+                await record_failure(
+                    pool, user_id, exc, "node_extractor", s.event_throttle_seconds
+                )
+                raise
 
 
 async def run_worker() -> None:

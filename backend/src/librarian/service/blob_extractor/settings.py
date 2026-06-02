@@ -15,6 +15,12 @@ class BlobExtractorSettings(BaseModel):
     error_backoff_max_seconds: float = 300.0
     error_backoff_multiplier: float = 2.0
 
+    # Worker-event throttle: a failure of the same (code, source) for the
+    # same user within this window is not re-recorded. Tames the ledger
+    # flood from re-picking a user with a broken token every iteration
+    # (workers have no per-user cooldown). See docs/15.user_worker_events.md.
+    event_throttle_seconds: float = 600.0
+
     # Chunking
     pages_per_blob: int = 10
     words_per_blob: int = 2000

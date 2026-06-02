@@ -5,6 +5,8 @@ from asyncpg.pool import PoolConnectionProxy
 
 from librarian.db.tables.data_node_abstracts import DataNodeAbstracts
 from librarian.db.tables.user_token_usage import Operation
+from librarian.db.tables.user_worker_events import EventCode
+from librarian.service.events import record_event
 from librarian.service.node_extractor.abstract import NodeAgents, extract_node_abstract
 from librarian.service.usage import record_usage
 
@@ -17,7 +19,7 @@ class ProcessNodeError(Exception):
 
 async def claim_next_extractable_node(
     conn: PoolConnectionProxy, user_id: int
-) -> tuple[int, int] | None:
+) -> tuple[int, int, bool] | None:
     """Pick a node without a data_node_abstracts row whose children all
     have abstracts already (blob children are always "ready" because
     data_blobs.abstract is NOT NULL). Lock the row FOR UPDATE so a parallel
@@ -28,7 +30,7 @@ async def claim_next_extractable_node(
     """
     record = await conn.fetchrow(
         """
-        SELECT n.node_id, n.height
+        SELECT n.node_id, n.height, n.is_root
         FROM data_nodes n
         WHERE n.user_id = $1
           AND NOT EXISTS (
@@ -60,7 +62,7 @@ async def claim_next_extractable_node(
     )
     if record is None:
         return None
-    return record["node_id"], record["height"]
+    return record["node_id"], record["height"], record["is_root"]
 
 
 async def fetch_children_abstracts(
@@ -96,6 +98,7 @@ async def process_one_node(
     user_id: int,
     leaf_model: str,
     internal_model: str,
+    event_throttle_seconds: float,
 ) -> bool:
     """Claim, compute, insert. Returns True iff a node was processed.
 
@@ -109,7 +112,7 @@ async def process_one_node(
     claimed = await claim_next_extractable_node(conn, user_id)
     if claimed is None:
         return False
-    node_id, height = claimed
+    node_id, height, is_root = claimed
     children = await fetch_children_abstracts(conn, user_id, node_id, height)
     if not children:
         raise ProcessNodeError(
@@ -130,5 +133,19 @@ async def process_one_node(
     model_used = leaf_model if height == 0 else internal_model
     await record_usage(conn, user_id, operation, model_used, usage)
     await DataNodeAbstracts(conn).insert(user_id, node_id, abstract.model_dump())
+    if is_root:
+        # The root abstract is the last piece that makes the library
+        # queryable. Throttled: the root abstract is recomputed every time
+        # the tree changes, so during an active build this would otherwise
+        # fire on each pass — collapse the burst into one "ready" per window.
+        await record_event(
+            conn,
+            user_id,
+            EventCode.LIBRARY_ABSTRACTED,
+            "node_extractor",
+            detail="Your library is ready to query.",
+            context={"node_id": node_id},
+            throttle_window=event_throttle_seconds,
+        )
     logger.info("node_extractor: node %s done", node_id)
     return True

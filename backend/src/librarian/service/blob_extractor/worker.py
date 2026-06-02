@@ -6,6 +6,7 @@ from asyncpg import Pool
 
 from librarian.common.http.client import open_client_session
 from librarian.db.connect import open_pool
+from librarian.db.tables.user_worker_events import EventCode
 from librarian.service.backoff import ExponentialBackoff
 from librarian.service.blob_extractor.abstract import build_main_agent
 from librarian.service.blob_extractor.pick import (
@@ -19,6 +20,7 @@ from librarian.service.credentials import (
     resolve_user_credentials,
 )
 from librarian.service.embedder import build_embedder
+from librarian.service.events import record_event, record_failure
 from librarian.service.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,15 @@ async def run_one_iteration(pool: Pool, http: ClientSession) -> bool:
                 )
             except MissingTokenError as exc:
                 logger.info("blob_extractor: user %s skipped (%s)", user_id, exc)
+                await record_event(
+                    conn,
+                    user_id,
+                    EventCode.MISSING_TOKEN,
+                    "blob_extractor",
+                    detail=str(exc),
+                    context={"slot": exc.slot, "model": exc.model},
+                    throttle_window=s.event_throttle_seconds,
+                )
                 return False
             file = await claim_next_unready_file_for_user(conn, user_id)
             if file is None:
@@ -108,18 +119,40 @@ async def run_one_iteration(pool: Pool, http: ClientSession) -> bool:
                 creds.blob_llm.model,
                 creds.embedding.model,
             )
-            await process_file(
-                file=file,
-                conn=conn,
-                http=http,
-                main_agent=main_agent,
-                tag_agent=tag_agent,
-                embedder=embedder,
-                blob_llm_model=creds.blob_llm.model,
-                embedding_model=creds.embedding.model,
-                settings=s,
-                embeddings_settings=settings.embeddings,
-                google_oauth_settings=settings.google_oauth,
+            try:
+                await process_file(
+                    file=file,
+                    conn=conn,
+                    http=http,
+                    main_agent=main_agent,
+                    tag_agent=tag_agent,
+                    embedder=embedder,
+                    blob_llm_model=creds.blob_llm.model,
+                    embedding_model=creds.embedding.model,
+                    settings=s,
+                    embeddings_settings=settings.embeddings,
+                    google_oauth_settings=settings.google_oauth,
+                )
+            except Exception as exc:
+                # The work transaction is unwinding, so record on a fresh
+                # connection (record_failure) — the event must outlive the
+                # rollback. Re-raise so worker_loop's backoff is unchanged.
+                await record_failure(
+                    pool,
+                    user_id,
+                    exc,
+                    "blob_extractor",
+                    s.event_throttle_seconds,
+                    context={"file_id": file.file_id},
+                )
+                raise
+            await record_event(
+                conn,
+                user_id,
+                EventCode.FILE_PROCESSED,
+                "blob_extractor",
+                detail=f"Processed {file.path}",
+                context={"file_id": file.file_id},
             )
             logger.info("blob_extractor: file %s done", file.file_id)
     return True

@@ -28,6 +28,8 @@ from librarian.api.endpoints.data.files import router as data_files_router
 from librarian.api.endpoints.data.query import router as data_query_router
 from librarian.api.endpoints.data.tree import router as data_tree_router
 from librarian.api.endpoints.health import router as health_router
+from librarian.api.endpoints.messages.counts import router as messages_counts_router
+from librarian.api.endpoints.messages.recent import router as messages_recent_router
 from librarian.api.endpoints.oauth.google import router as oauth_google_router
 from librarian.api.endpoints.oauth.mcp.consent import router as oauth_mcp_router
 from librarian.api.endpoints.settings.catalog import router as settings_catalog_router
@@ -71,6 +73,8 @@ def create() -> FastAPI:
     app.include_router(settings_me_router)
     app.include_router(settings_tokens_router)
     app.include_router(settings_usage_router)
+    app.include_router(messages_recent_router)
+    app.include_router(messages_counts_router)
 
     # OAuth authorization server — `/.well-known/oauth-authorization-server`,
     # `/authorize`, `/token`, `/register`, `/revoke`. The SDK builds these

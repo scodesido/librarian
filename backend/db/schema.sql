@@ -752,6 +752,42 @@ ALTER SEQUENCE public.user_token_usage_usage_id_seq OWNED BY public.user_token_u
 
 
 --
+-- Name: user_worker_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_worker_events (
+    event_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    code integer NOT NULL,
+    source text NOT NULL,
+    detail text,
+    context jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_worker_events_code_check CHECK (((code >= 1000) AND (code <= 4999))),
+    CONSTRAINT user_worker_events_source_check CHECK ((source = ANY (ARRAY['blob_extractor'::text, 'node_extractor'::text, 'tree_builder'::text])))
+);
+
+
+--
+-- Name: user_worker_events_event_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.user_worker_events_event_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: user_worker_events_event_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.user_worker_events_event_id_seq OWNED BY public.user_worker_events.event_id;
+
+
+--
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -836,6 +872,13 @@ ALTER TABLE ONLY public.data_nodes ALTER COLUMN node_id SET DEFAULT nextval('pub
 --
 
 ALTER TABLE ONLY public.user_token_usage ALTER COLUMN usage_id SET DEFAULT nextval('public.user_token_usage_usage_id_seq'::regclass);
+
+
+--
+-- Name: user_worker_events event_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_worker_events ALTER COLUMN event_id SET DEFAULT nextval('public.user_worker_events_event_id_seq'::regclass);
 
 
 --
@@ -1038,6 +1081,14 @@ ALTER TABLE ONLY public.user_token_usage
 
 
 --
+-- Name: user_worker_events user_worker_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_worker_events
+    ADD CONSTRAINT user_worker_events_pkey PRIMARY KEY (event_id);
+
+
+--
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1169,6 +1220,13 @@ CREATE INDEX idx_oauth_refresh_tokens_user_id ON public.oauth_refresh_tokens USI
 --
 
 CREATE INDEX idx_user_token_usage_user_id_created_at ON public.user_token_usage USING btree (user_id, created_at DESC);
+
+
+--
+-- Name: idx_user_worker_events_user_id_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_user_worker_events_user_id_created_at ON public.user_worker_events USING btree (user_id, created_at DESC);
 
 
 --
@@ -1410,6 +1468,13 @@ CREATE TRIGGER user_token_usage_prevent_any_update BEFORE UPDATE ON public.user_
 
 
 --
+-- Name: user_worker_events user_worker_events_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER user_worker_events_prevent_any_update BEFORE UPDATE ON public.user_worker_events FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
 -- Name: users users_prevent_created_at_change; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1632,6 +1697,14 @@ ALTER TABLE ONLY public.user_token_usage
 
 
 --
+-- Name: user_worker_events user_worker_events_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_worker_events
+    ADD CONSTRAINT user_worker_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- PostgreSQL database dump complete
 --
 
@@ -1652,4 +1725,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('202605180006'),
     ('202605180007'),
     ('202605260001'),
-    ('202605290001');
+    ('202605290001'),
+    ('202606020001');

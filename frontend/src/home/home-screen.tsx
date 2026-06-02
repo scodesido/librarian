@@ -13,6 +13,7 @@ import SettingsPanel from "../settings/settings-panel";
 import SearchPanel from "./search-panel";
 import SyncPanel from "./sync-panel";
 import TreeExplorer from "./tree-explorer";
+import WorkerEvents from "./worker-events";
 
 interface HomeScreenProps {
   me: Me;
@@ -53,7 +54,10 @@ function HomeScreen({ me, onLoggedOut }: HomeScreenProps) {
             <Tabs.Tab value="settings">Settings</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="sync" pt="md">
-            <SyncPanel />
+            <Stack gap="xl">
+              <SyncPanel />
+              <WorkerEvents />
+            </Stack>
           </Tabs.Panel>
           <Tabs.Panel value="tree" pt="md">
             <TreeExplorer />

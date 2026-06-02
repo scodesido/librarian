@@ -5,6 +5,7 @@ from asyncpg import Pool
 
 from librarian.db.connect import open_pool
 from librarian.service.backoff import ExponentialBackoff
+from librarian.service.events import record_failure
 from librarian.service.settings import settings
 from librarian.service.tree_builder.insert import insert_one_ready_blob
 from librarian.service.tree_builder.pick import pick_user_with_work
@@ -49,17 +50,31 @@ async def run_one_iteration(pool: Pool) -> bool:
                 return False
             await conn.execute("SELECT pg_advisory_xact_lock($1)", user_id)
 
-            if await backfill_one_weight(conn, user_id):
-                logger.info("tree_builder: backfilled one weight (user %s)", user_id)
-                return True
-            if await split_one_overfull(
-                conn, user_id, s.max_children_per_node, s.imbalance_alpha
-            ):
-                logger.info("tree_builder: split one over-K node (user %s)", user_id)
-                return True
-            if await insert_one_ready_blob(conn, user_id, s.imbalance_alpha):
-                logger.info("tree_builder: attached one ready blob (user %s)", user_id)
-                return True
+            try:
+                if await backfill_one_weight(conn, user_id):
+                    logger.info(
+                        "tree_builder: backfilled one weight (user %s)", user_id
+                    )
+                    return True
+                if await split_one_overfull(
+                    conn, user_id, s.max_children_per_node, s.imbalance_alpha
+                ):
+                    logger.info(
+                        "tree_builder: split one over-K node (user %s)", user_id
+                    )
+                    return True
+                if await insert_one_ready_blob(conn, user_id, s.imbalance_alpha):
+                    logger.info(
+                        "tree_builder: attached one ready blob (user %s)", user_id
+                    )
+                    return True
+            except Exception as exc:
+                # Record on a fresh connection (the work txn is rolling
+                # back), then re-raise to keep worker_loop's backoff.
+                await record_failure(
+                    pool, user_id, exc, "tree_builder", s.event_throttle_seconds
+                )
+                raise
     return False
 
 
