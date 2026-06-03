@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 from aiohttp import ClientSession
 from asyncpg import Pool
@@ -18,16 +18,16 @@ from librarian.service.credentials import (
     resolve_user_credentials,
 )
 from librarian.service.retrieval.events import (
-    BlobResult,
     ErrorEvent,
     QueryEvent,
+    ResultBlob,
 )
 from librarian.service.retrieval.preflight import (
     QueryPreflight,
     preflight_query,
 )
 from librarian.service.retrieval.run import run_retrieval
-from librarian.service.retrieval.tools import BudgetExceededError
+from librarian.service.retrieval.tools.errors import BudgetExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -37,24 +37,26 @@ router = APIRouter(prefix="/data/query")
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1)
     # Optional override for the text that gets embedded and used to score
-    # sibling children at each expand_nodes step. When None, the question
+    # sibling children at each list_children step. When None, the question
     # itself is embedded — useful for short, well-framed questions. When
     # set, the agent still answers the `question` but the similarity hint
     # follows `search_terms`, which is useful when the question is long-
     # winded or full of conversational framing and the user can name the
     # underlying topic more directly.
     search_terms: str | None = Field(default=None, min_length=1)
+    # How the selected blobs' contents come back. "text" (default) returns
+    # plaintext; "binary" returns the original bytes (PDF page range as PDF,
+    # text slice as bytes) base64-encoded. The webapp always uses "text".
+    content_format: Literal["text", "binary"] = "text"
 
 
 class QueryResponse(BaseModel):
-    blobs: list[BlobResult]
-    visited_node_ids: list[int]
-    steps: int
     rationale: str
     # Echoes the search-terms string used for similarity scoring. Mirrors
     # the SSE `terms` event so JSON callers have access to the same info
     # without consuming the stream.
     effective_search_terms: str
+    blobs: list[ResultBlob]
 
 
 def missing_token_http(exc: MissingTokenError) -> HTTPException:
@@ -98,7 +100,14 @@ async def query(
     )
     try:
         result = await run_retrieval(
-            conn, http, user_id, body.question, preflight, creds, emit=None
+            conn,
+            http,
+            user_id,
+            body.question,
+            preflight,
+            creds,
+            emit=None,
+            binary=body.content_format == "binary",
         )
     except BudgetExceededError as exc:
         raise HTTPException(
@@ -106,11 +115,9 @@ async def query(
             detail=f"Descent budget exhausted. {exc}",
         ) from exc
     return QueryResponse(
-        blobs=result.blobs,
-        visited_node_ids=result.visited_node_ids,
-        steps=result.steps,
         rationale=result.rationale,
         effective_search_terms=result.effective_search_terms,
+        blobs=result.blobs,
     )
 
 
@@ -121,6 +128,7 @@ async def query_event_stream(
     question: str,
     preflight: QueryPreflight,
     creds: UserCredentials,
+    binary: bool,
 ) -> AsyncIterator[bytes]:
     """Run the agent against its own pool connection (not the request-scoped
     one — the StreamingResponse generator outlives the request handler) and
@@ -141,7 +149,7 @@ async def query_event_stream(
         async def run() -> None:
             try:
                 await run_retrieval(
-                    conn, http, user_id, question, preflight, creds, emit
+                    conn, http, user_id, question, preflight, creds, emit, binary
                 )
             except BudgetExceededError as exc:
                 await queue.put(ErrorEvent(detail=f"Descent budget exhausted. {exc}"))
@@ -213,7 +221,15 @@ async def query_stream(
     if pool is None:
         raise ValueError("No database connection pool available")
     return StreamingResponse(
-        query_event_stream(pool, http, user_id, body.question, preflight, creds),
+        query_event_stream(
+            pool,
+            http,
+            user_id,
+            body.question,
+            preflight,
+            creds,
+            body.content_format == "binary",
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

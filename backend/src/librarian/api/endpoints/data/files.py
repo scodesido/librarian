@@ -61,7 +61,7 @@ async def fetch_drive_page(
     params: dict[str, Any] = {
         "q": q,
         "pageSize": DRIVE_PAGE_SIZE,
-        "fields": "nextPageToken,files(id,mimeType)",
+        "fields": "nextPageToken,files(id,mimeType,name)",
     }
     if page_token is not None:
         params["pageToken"] = page_token
@@ -117,47 +117,44 @@ async def list_folder_children(
 
 
 async def list_files_recursive(
-    http: ClientSession, access_token: str, folder_id: str
-) -> list[tuple[str, FileType]]:
-    queue: list[str] = [folder_id]
-    result: list[tuple[str, FileType]] = []
+    http: ClientSession, access_token: str, folder_id: str, base_path: str
+) -> list[tuple[str, FileType, str]]:
+    """Walk `folder_id` and its subfolders, returning each non-folder file as
+    (drive_id, type, full_path). `full_path` is the file's folder path under
+    the synced root, built from `base_path` plus each folder/file name as we
+    descend (e.g. base "Research" -> "Research/2024/report.pdf").
+    """
+    queue: list[tuple[str, str]] = [(folder_id, base_path)]
+    result: list[tuple[str, FileType, str]] = []
     while queue:
-        current = queue.pop()
+        current, prefix = queue.pop()
         for child in await list_folder_children(http, access_token, current):
+            name = child["name"]
+            child_path = f"{prefix}/{name}" if prefix else name
             if child["mimeType"] == DRIVE_FOLDER_MIME:
-                queue.append(child["id"])
+                queue.append((child["id"], child_path))
             else:
-                result.append((child["id"], classify_mime(child["mimeType"])))
+                result.append(
+                    (child["id"], classify_mime(child["mimeType"]), child_path)
+                )
     return result
-
-
-async def list_drive_files_flat(
-    http: ClientSession, access_token: str
-) -> list[tuple[str, FileType]]:
-    q = f"trashed = false and mimeType != '{DRIVE_FOLDER_MIME}'"
-    items: list[tuple[str, FileType]] = []
-    page_token: str | None = None
-    while True:
-        body = await fetch_drive_page(http, access_token, q, page_token)
-        for child in body.get("files", []):
-            items.append((child["id"], classify_mime(child["mimeType"])))
-        page_token = body.get("nextPageToken")
-        if not page_token:
-            return items
 
 
 async def list_drive_files(
     http: ClientSession, access_token: str, prefix: str
-) -> list[tuple[str, FileType]]:
+) -> list[tuple[str, FileType, str]]:
+    # Always recurse from the resolved start folder (the Drive root for an
+    # empty prefix). A flat listing would be one query for the whole drive,
+    # but it returns files without their folder context, so it can't build the
+    # full path we store as `name`. The recursive walk costs one query per
+    # folder in exchange for correct paths everywhere.
     segments = normalize_prefix(prefix)
-    if not segments:
-        return await list_drive_files_flat(http, access_token)
     folder_id = await resolve_folder_path(http, access_token, segments)
     if folder_id is None:
         raise HTTPException(
             status_code=404, detail=f"Prefix folder not found: {prefix}"
         )
-    return await list_files_recursive(http, access_token, folder_id)
+    return await list_files_recursive(http, access_token, folder_id, "/".join(segments))
 
 
 # TODO: also fetch modifiedTime from Drive and pass it through to
@@ -186,7 +183,7 @@ async def sync(
         raise HTTPException(
             status_code=404, detail=f"No files found under prefix: {body.prefix}"
         )
-    paths = [path for path, _ in items]
+    paths = [drive_id for drive_id, _, _ in items]
 
     files = DataFiles(conn)
     async with conn.transaction():

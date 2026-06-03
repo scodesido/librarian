@@ -1,21 +1,18 @@
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field
-
-from librarian.db.tree_children import ChildView
 
 
 class TermsEvent(BaseModel):
     """Emitted once at the start of the SSE stream (before the first
-    `expand`). Carries the string we actually embedded for similarity
+    `ProgressEvent`). Carries the string we actually embedded for similarity
     scoring, plus a flag indicating whether it came from an explicit
-    `search_terms` / the question itself (`extracted=False`) or from
-    the pre-flight extraction agent (`extracted=True`).
+    `search_terms` / the question itself (`extracted=False`) or from the
+    pre-flight extraction agent (`extracted=True`).
 
-    The FE renders this immediately so the user can see what we
-    searched for without waiting for `done`. The same string is also
-    echoed on `DoneEvent.effective_search_terms` for non-streaming
-    clients and for stream clients that only consume the final event.
+    The FE renders this immediately so the user can see what we searched for
+    without waiting for `done`. The same string is echoed on
+    `DoneEvent.effective_search_terms` for non-streaming clients.
     """
 
     kind: Literal["terms"] = "terms"
@@ -23,38 +20,52 @@ class TermsEvent(BaseModel):
     extracted: bool
 
 
-class ExpandEvent(BaseModel):
-    """The agent called `expand_nodes` with a batch of node_ids. Carries the
-    full result so the FE can render one timeline entry per call.
+class Brief(BaseModel):
+    """The whole of what we expose about a node/blob the agent touched mid-walk:
+    a display title and the flat tag list. No ids, no scores, no extraction
+    fields — those are internals we keep free to iterate on.
     """
 
-    kind: Literal["expand"] = "expand"
-    step: int
-    budget: int
-    requested_node_ids: list[int]
-    expanded: list["ExpandedNode"]
+    title: str | None
+    tags: list[str]
 
 
-class FetchEvent(BaseModel):
-    """The agent peeked at blob contents. We don't stream the contents
-    themselves (they may be large); just the blob_ids it looked at.
+class ProgressEvent(BaseModel):
+    """One per agent tool call. `action` says which tool fired; `items` carries
+    the title+tags of whatever it touched. `step`/`budget` are populated only
+    on `descend` (the only action that consumes the descent budget) so a
+    progress bar can move; everything else leaves them None.
     """
 
-    kind: Literal["fetch"] = "fetch"
-    blob_ids: list[int]
+    kind: Literal["progress"] = "progress"
+    action: Literal["descend", "detail", "peek", "file"]
+    items: list[Brief]
+    step: int | None = None
+    budget: int | None = None
+
+
+class ResultBlob(BaseModel):
+    """Final per-blob payload. `content` is plaintext when `encoding == "text"`
+    and base64 when `encoding == "base64"` (binary mode); `mime_type` describes
+    it either way. Deliberately free of internal ids, byte ranges, and the full
+    Abstract — just what a caller needs to use the fragment.
+    """
+
+    title: str | None
+    file_name: str
+    tags: list[str]
+    mime_type: str
+    content: str
+    encoding: Literal["text", "base64"]
 
 
 class DoneEvent(BaseModel):
     kind: Literal["done"] = "done"
-    blobs: list["BlobResult"]
-    visited_node_ids: list[int]
-    steps: int
     rationale: str
-    # The search-terms string actually used to score sibling children.
-    # Mirrors TermsEvent.effective_search_terms — kept on `done` too so
-    # JSON callers and stream clients that only consume the final event
-    # have access to it without having to remember the early event.
+    # The search-terms string actually used (echoed from TermsEvent so JSON
+    # callers and stream clients that only read the final event have it).
     effective_search_terms: str
+    blobs: list[ResultBlob]
 
 
 class ErrorEvent(BaseModel):
@@ -63,34 +74,6 @@ class ErrorEvent(BaseModel):
 
 
 QueryEvent = Annotated[
-    Union[TermsEvent, ExpandEvent, FetchEvent, DoneEvent, ErrorEvent],
+    Union[TermsEvent, ProgressEvent, DoneEvent, ErrorEvent],
     Field(discriminator="kind"),
 ]
-
-
-class ExpandedNode(BaseModel):
-    """One entry of the `expand_nodes` tool's structured output: the parent
-    node_id plus its immediate children, each carrying the abstract the agent
-    needs to choose where to descend next.
-    """
-
-    node_id: int
-    children: list[ChildView]
-
-
-class BlobResult(BaseModel):
-    """Final per-blob payload returned in the response (or the `done` event).
-    `content` is plaintext; binary support is a future extension.
-    """
-
-    blob_id: int
-    file_id: int
-    file_path: str
-    file_start: int
-    file_end: int
-    abstract: dict[str, Any]
-    content: str
-
-
-ExpandEvent.model_rebuild()
-DoneEvent.model_rebuild()

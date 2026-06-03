@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 import numpy as np
@@ -42,4 +42,5 @@ class QueryDeps:
     emit: Callable[[QueryEvent], Awaitable[None]] | None = None
     step_count: int = 0
     content_fetch_count: int = 0
-    visited_node_ids: list[int] = field(default_factory=list)
+    detail_fetch_count: int = 0
+    file_listing_count: int = 0

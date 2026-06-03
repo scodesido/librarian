@@ -25,26 +25,34 @@ class DataFiles(Table):
         self,
         user_id: int,
         source: FileSource,
-        items: list[tuple[str, FileType]],
+        items: list[tuple[str, FileType, str]],
     ) -> int:
         # TODO: also populate source_modified_at from the sync layer and add
         # a stale-detection branch ("source row is newer than DB row -> delete
         # + re-insert, cascading blobs"). Deferred until the sync rewrite.
+        #
+        # `items` is (path, type, name): `path` is the source key (Drive file
+        # id), `name` the human-readable full path captured at sync. ON
+        # CONFLICT DO NOTHING means an already-synced file keeps its existing
+        # `name` — pre-migration rows stay '' until cleared and re-synced.
         if not items:
             return 0
-        paths = [path for path, _ in items]
-        types = [type_ for _, type_ in items]
+        paths = [path for path, _, _ in items]
+        types = [type_ for _, type_, _ in items]
+        names = [name for _, _, name in items]
         result: str = await self.conn.execute(
             (
-                "INSERT INTO data_files (user_id, source, path, type) "
-                "SELECT $1, $2, p.path, p.type "
-                "FROM unnest($3::text[], $4::text[]) AS p(path, type) "
+                "INSERT INTO data_files (user_id, source, path, type, name) "
+                "SELECT $1, $2, p.path, p.type, p.name "
+                "FROM unnest($3::text[], $4::text[], $5::text[]) "
+                "AS p(path, type, name) "
                 "ON CONFLICT (user_id, source, path) DO NOTHING"
             ),
             user_id,
             source,
             paths,
             types,
+            names,
         )
         return int(result.rsplit(" ", 1)[-1])
 

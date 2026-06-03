@@ -1,6 +1,6 @@
 from io import BytesIO
 
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
@@ -24,3 +24,18 @@ def extract_pdf_pages_text(pdf_bytes: bytes, start_page: int, end_page: int) -> 
     return "\n".join(
         reader.pages[i].extract_text() or "" for i in range(start_page, end_page)
     )
+
+
+def extract_pdf_pages_bytes(pdf_bytes: bytes, start_page: int, end_page: int) -> bytes:
+    """Reconstruct a standalone PDF holding only the half-open page range
+    [start_page, end_page) of the source. Used by retrieval's binary output
+    mode: a blob is a *fragment*, so we return its page range as a valid PDF
+    rather than the whole source file or an un-sliceable byte range.
+    """
+    reader = PdfReader(BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    for i in range(start_page, end_page):
+        writer.add_page(reader.pages[i])
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()

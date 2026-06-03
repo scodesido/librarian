@@ -14,6 +14,7 @@ middleware (wired in `app.py`) populates a contextvar with the active
 `LibrarianAccessToken`, which the tool reads via `get_access_token()`.
 """
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -25,7 +26,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel, Field
+from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
 
 from librarian.api.core.oauth.auth_server.provider import LibrarianAccessToken
 from librarian.api.settings import settings
@@ -34,15 +35,13 @@ from librarian.service.credentials import (
     resolve_user_credentials,
 )
 from librarian.service.retrieval.events import (
-    BlobResult,
-    ExpandEvent,
-    FetchEvent,
+    ProgressEvent,
     QueryEvent,
     TermsEvent,
 )
 from librarian.service.retrieval.preflight import preflight_query
-from librarian.service.retrieval.run import run_retrieval
-from librarian.service.retrieval.tools import BudgetExceededError
+from librarian.service.retrieval.run import RetrievalResult, run_retrieval
+from librarian.service.retrieval.tools.errors import BudgetExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -104,35 +103,58 @@ def current_user_id() -> int:
     return access_token.user_id
 
 
-class MCPQueryResult(BaseModel):
-    """What the MCP tool returns to the calling LLM. Strict subset of the
-    internal `RetrievalResult`: drops `visited_node_ids` and `steps`
-    (internal debugging signal — not useful to the caller), keeps the
-    rationale so the LLM understands *why* the agent picked these blobs
-    on top of *what* they contain.
-    """
+ResultBlock = TextContent | EmbeddedResource
 
-    rationale: str = Field(
-        description=(
-            "Short note from the retrieval agent explaining why these blobs "
-            "were chosen as the best matches for the question."
+
+def result_to_blocks(result: RetrievalResult) -> list[ResultBlock]:
+    """Render a RetrievalResult as MCP content blocks. Binary blob bytes can't
+    live in MCP structured output, so we return content blocks uniformly in
+    both modes: a leading text block with the rationale + effective terms, then
+    per blob a pair — a text block with that blob's title/file_name/tags
+    (JSON), followed by the content itself (a text block in text mode, or an
+    embedded binary resource in binary mode). Keeping each blob's metadata
+    adjacent to its bytes is the reason for interleaving rather than a header +
+    a flat resource list.
+    """
+    blocks: list[ResultBlock] = [
+        TextContent(
+            type="text",
+            text=json.dumps(
+                {
+                    "rationale": result.rationale,
+                    "effective_search_terms": result.effective_search_terms,
+                }
+            ),
         )
-    )
-    effective_search_terms: str = Field(
-        description=(
-            "The distilled search-terms string that was actually embedded "
-            "and used to score document similarity. When `search_terms` was "
-            "omitted from the call, this is the LLM-extracted distillation "
-            "of `question` — useful to confirm what the agent searched for."
+    ]
+    for index, blob in enumerate(result.blobs):
+        blocks.append(
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "title": blob.title,
+                        "file_name": blob.file_name,
+                        "tags": blob.tags,
+                    }
+                ),
+            )
         )
-    )
-    blobs: list[BlobResult] = Field(
-        description=(
-            "Selected document fragments, in priority order. Each carries "
-            "the source file path, byte/page range, a structured abstract, "
-            "and the full plaintext content of the fragment."
-        )
-    )
+        if blob.encoding == "base64":
+            blocks.append(
+                EmbeddedResource(
+                    type="resource",
+                    resource=BlobResourceContents(
+                        # Synthetic, non-identifying — we don't leak blob ids.
+                        uri=f"librarian://result/{index}",
+                        mimeType=blob.mime_type,
+                        blob=blob.content,
+                    ),
+                )
+            )
+        else:
+            blocks.append(TextContent(type="text", text=blob.content))
+    return blocks
 
 
 # Stateless mode: the MCP retrieval has no notion of a multi-request session
@@ -161,28 +183,35 @@ mcp = FastMCP(
 )
 
 
+PROGRESS_VERBS: dict[str, str] = {
+    "descend": "Descended into",
+    "detail": "Inspected",
+    "peek": "Peeked at",
+    "file": "Listed file blobs",
+}
+
+
 def event_summary(event: QueryEvent) -> str | None:
     """Render a `QueryEvent` as a one-line progress message.
 
     Mirrors what the FE shows from the SSE stream but in flat text — the
     calling LLM benefits from compact, scannable progress lines, not from
     the structured payload. Used as the `message` argument of
-    `ctx.report_progress`. Returns `None` for events that don't need to
-    be surfaced (DoneEvent: its payload becomes the tool result; ErrorEvent
-    isn't emitted on the success path).
+    `ctx.report_progress`. Returns `None` for events that don't need to be
+    surfaced (DoneEvent: its payload becomes the tool result; ErrorEvent isn't
+    emitted on the success path).
+
+    Only titles are shown — the same title+tags briefs the FE renders, minus
+    any internal ids.
     """
     if isinstance(event, TermsEvent):
         source = "extracted from question" if event.extracted else "as provided"
         return f"Searched for: {event.effective_search_terms!r} ({source})."
-    if isinstance(event, ExpandEvent):
-        node_ids = ", ".join(str(n) for n in event.requested_node_ids)
-        return (
-            f"Step {event.step}/{event.budget}: expanded "
-            f"{len(event.requested_node_ids)} node(s) [{node_ids}]."
-        )
-    if isinstance(event, FetchEvent):
-        blob_ids = ", ".join(str(b) for b in event.blob_ids)
-        return f"Peeked at {len(event.blob_ids)} blob(s) [{blob_ids}]."
+    if isinstance(event, ProgressEvent):
+        titles = ", ".join(b.title or "(untitled)" for b in event.items) or "—"
+        if event.action == "descend" and event.step is not None:
+            return f"Step {event.step}/{event.budget}: descended into {titles}."
+        return f"{PROGRESS_VERBS[event.action]}: {titles}."
     return None
 
 
@@ -204,32 +233,43 @@ def event_summary(event: QueryEvent) -> str | None:
         "framing that wouldn't appear in document text (e.g. 'I'm trying to "
         "remember that paper I read last month about X' → "
         "search_terms='X'). Leave it out for terse, on-topic questions; "
-        "the server will distill terms from the question automatically.\n\n"
+        "the server will distill terms from the question automatically.\n"
+        "  - `binary` (optional, default false): when false, each fragment "
+        "comes back as plaintext. When true, fragments come back as their "
+        "original bytes — a PDF fragment as a PDF of its page range, a text "
+        "fragment as raw bytes — embedded as binary resources. Use binary "
+        "when layout/figures matter or you need the original file format.\n\n"
         "Progress is reported via log notifications as the agent descends "
-        "the tree, peeks at blobs, and finalises its selection. The final "
-        "result contains the agent's rationale plus the selected fragments "
-        "with their abstracts and plaintext contents."
+        "the tree, inspects nodes and fragments, and finalises its selection. "
+        "The result is the agent's rationale followed by the selected "
+        "fragments, each with its title and tags and its content (text or an "
+        "embedded binary resource)."
     ),
 )
 async def query_library(
     question: str,
     search_terms: str | None,
     ctx: Context,  # type: ignore[type-arg]
-) -> MCPQueryResult:
+    binary: bool = False,
+) -> list[ResultBlock]:
     deps = get_deps()
     user_id = current_user_id()
 
-    # Progress state, updated as the agent descends. Only ExpandEvent carries
-    # the step/budget pair; TermsEvent and FetchEvent reuse the last known
-    # values so the bar (in clients that render one) moves monotonically while
-    # the `message` keeps reflecting what the agent is doing right now. Both
-    # `progress` and `total` are floats per the MCP spec.
+    # Progress state, updated as the agent descends. Only the `descend`
+    # ProgressEvent carries the step/budget pair; other events reuse the last
+    # known values so the bar (in clients that render one) moves monotonically
+    # while the `message` keeps reflecting what the agent is doing right now.
+    # Both `progress` and `total` are floats per the MCP spec.
     progress = 0.0
     total: float | None = None
 
     async def emit(event: QueryEvent) -> None:
         nonlocal progress, total
-        if isinstance(event, ExpandEvent):
+        if (
+            isinstance(event, ProgressEvent)
+            and event.step is not None
+            and event.budget is not None
+        ):
             progress = float(event.step)
             total = float(event.budget)
         message = event_summary(event)
@@ -253,7 +293,7 @@ async def query_library(
                 deps.http, conn, user_id, question, search_terms, creds
             )
             result = await run_retrieval(
-                conn, deps.http, user_id, question, preflight, creds, emit
+                conn, deps.http, user_id, question, preflight, creds, emit, binary
             )
         except MissingTokenError as exc:
             # MCP has no HTTP status; flatten to a tool error that names
@@ -274,11 +314,7 @@ async def query_library(
         except BudgetExceededError as exc:
             raise ValueError(f"retrieval budget exhausted: {exc}") from exc
 
-    return MCPQueryResult(
-        rationale=result.rationale,
-        effective_search_terms=result.effective_search_terms,
-        blobs=result.blobs,
-    )
+    return result_to_blocks(result)
 
 
 def build_asgi() -> Any:

@@ -37,7 +37,7 @@ def parse_node_ref(ref: str) -> int:
         raise InvalidNodeRefError(
             f"expected a node ref like 'n:NNN', got {ref!r}. "
             f"If this is a blob ref (starts with 'b:'), it belongs to "
-            f"`fetch_blob_contents`, not `expand_nodes`."
+            f"`peek_blob` / `list_file_blobs`, not `list_children`."
         )
     try:
         return int(ref[len(NODE_REF_PREFIX) :])
@@ -50,7 +50,7 @@ def parse_blob_ref(ref: str) -> int:
         raise InvalidBlobRefError(
             f"expected a blob ref like 'b:NNN', got {ref!r}. "
             f"If this is a node ref (starts with 'n:'), it belongs to "
-            f"`expand_nodes`, not `fetch_blob_contents`."
+            f"`list_children` / `node_detail`, not `peek_blob`."
         )
     try:
         return int(ref[len(BLOB_REF_PREFIX) :])
@@ -305,6 +305,73 @@ async def fetch_blob_children_scored(
         )
         for r in rows
     ]
+
+
+async def fetch_blob_file_id(
+    conn: PoolConnectionProxy, user_id: int, blob_id: int
+) -> int | None:
+    """The owning file of a blob, or None if the blob doesn't exist for this
+    user. Used by `list_file_blobs` to resolve a blob ref to its file before
+    listing the file's blobs.
+    """
+    return await conn.fetchval(
+        "SELECT file_id FROM data_blobs WHERE user_id = $1 AND blob_id = $2",
+        user_id,
+        blob_id,
+    )
+
+
+async def fetch_file_blobs_scored(
+    conn: PoolConnectionProxy,
+    user_id: int,
+    file_id: int,
+    query_embedding: NDArray[np.float32],
+    limit: int,
+    offset: int,
+) -> tuple[list[BlobChildView], int]:
+    """One page of a file's blobs, in document order (`file_blob_index`), each
+    carrying a `similarity_score` against `embedding_blob` (same column choice
+    as `fetch_blob_children_scored`). Returns the page plus the file's total
+    blob count (via a window aggregate) so the caller can paginate.
+
+    Unlike the *_children fetchers this walks `data_blobs` directly by
+    `file_id` rather than the tree edges — the point is document adjacency,
+    which is orthogonal to tree structure.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT b.blob_id, b.abstract, b.file_id, b.file_blob_index,
+               b.file_start, b.file_end,
+               1 - (b.embedding_blob <=> $3::vector) AS similarity_score,
+               count(*) OVER () AS total
+        FROM data_blobs b
+        WHERE b.user_id = $1 AND b.file_id = $2
+        ORDER BY b.file_blob_index
+        LIMIT $4 OFFSET $5
+        """,
+        user_id,
+        file_id,
+        query_embedding,
+        limit,
+        offset,
+    )
+    total = int(rows[0]["total"]) if rows else 0
+    page = [
+        BlobChildView(
+            ref=blob_ref(r["blob_id"]),
+            blob_id=r["blob_id"],
+            abstract=r["abstract"],
+            file_id=r["file_id"],
+            file_blob_index=r["file_blob_index"],
+            file_start=r["file_start"],
+            file_end=r["file_end"],
+            similarity_score=(
+                None if r["similarity_score"] is None else float(r["similarity_score"])
+            ),
+        )
+        for r in rows
+    ]
+    return page, total
 
 
 async def fetch_children_scored(

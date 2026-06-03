@@ -17,10 +17,11 @@ from librarian.db.tree_children import (
 from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 from librarian.service.retrieval.deps import QueryDeps
-from librarian.service.retrieval.tools import (
-    expand_nodes_impl,
-    fetch_blob_contents_impl,
-)
+from librarian.service.retrieval.tools.children import list_children_impl
+from librarian.service.retrieval.tools.file_blobs import list_file_blobs_impl
+from librarian.service.retrieval.tools.node_detail import node_detail_impl
+from librarian.service.retrieval.tools.peek import peek_blob_impl
+from librarian.service.retrieval.views import child_summary
 
 
 class FinalAnswer(BaseModel):
@@ -35,7 +36,7 @@ class FinalAnswer(BaseModel):
         description=(
             "The blob refs you have selected as the best answers to the "
             "user's question, in priority order. Each ref must be a string "
-            "starting with 'b:' (taken verbatim from a BlobChildView entry's "
+            "starting with 'b:' (taken verbatim from a blob entry's "
             "`ref` field). Up to the cap given in the instructions. Return "
             "fewer if fewer are relevant. Do not invent or modify refs."
         )
@@ -50,7 +51,7 @@ def compute_budget(root_height: int, multiplier: float) -> int:
 
     The +1 handles the trivial height-0 case (the whole library fits as
     blob children of a single root) — without it the budget would be 0 and
-    the agent couldn't make a single expand_nodes call. The floor of 2
+    the agent couldn't make a single list_children call. The floor of 2
     guarantees the agent always has at least one descent and one revisit,
     even at C close to zero.
     """
@@ -66,14 +67,14 @@ async def build_seed_context(
 ) -> dict[str, Any]:
     """Materialise the seed the agent sees in its instructions: the root's
     own abstract plus the abstracts of the root's immediate children. Same
-    shape the tool would return on the first expand_nodes call, but inlined
+    shape the tool would return on the first list_children call, but inlined
     into the instructions so the agent doesn't have to spend a step on it
     (and so Anthropic prompt caching covers the seed).
 
     The root's children are fetched via the scored fetcher so the seed
     already carries `similarity_score` for each — the agent's first
     impression sees the same signal it'll see on every subsequent
-    expand_nodes call. `similarity_terms` is also surfaced so the agent
+    list_children call. `similarity_terms` is also surfaced so the agent
     can reconcile the score field with the actual text that was embedded
     (which may differ from the user's question after the pre-flight
     extraction step). Note that swapping search terms changes the seed
@@ -88,7 +89,9 @@ async def build_seed_context(
         "root_height": root.height,
         "root_abstract": abstract,
         "similarity_terms": effective_search_terms,
-        "root_children": [c.model_dump() for c in children],
+        # Same summary projection `list_children` returns, so the seed and a
+        # first descent step look identical.
+        "root_children": [child_summary(c).model_dump() for c in children],
     }
 
 
@@ -100,8 +103,10 @@ def build_instructions(
         "You are a retrieval agent that walks a user's document library, "
         "organised as an abstraction tree, to answer the user's question by "
         "selecting the most relevant document blobs.\n\n"
-        "Tree shape: every node has an Abstract (summary, topics, key claims, "
-        "etc.). Internal nodes' Abstracts synthesize their children's. Leaf "
+        "Tree shape: every node has an Abstract. On a listing you see its "
+        "*summary* fields (title, topics, domains, entities, tags). The longer "
+        "prose (summary, key questions, key claims) is fetched on demand. "
+        "Internal nodes' Abstracts synthesize their children's. Leaf "
         "(height-0) nodes have blob children; each blob carries a portion of "
         "a source document and its own Abstract.\n\n"
         "Refs — IMPORTANT:\n"
@@ -118,14 +123,15 @@ def build_instructions(
         "similarity in [-1, 1] between the user's search terms (embedded with "
         "the same model used to index the library) and the child's stored "
         "embedding. This is ADDITIONAL INFORMATION FOR CONSIDERATION, not the "
-        "criterion you should optimise. The Abstracts (topics, key_questions, "
-        "key_claims, summary, …) remain the authoritative signal — the score "
+        "criterion you should optimise. The Abstracts (the summary fields you "
+        "see on every listing, plus the prose you can pull with node_detail) "
+        "remain the authoritative signal — the score "
         "is a vector-space hint that can complement them, especially when "
         "Abstracts are close in topic but worded differently from the user's "
         "search terms.\n"
         "Two important constraints on how to read it:\n"
         "  1. Compare scores ONLY within siblings of the same parent (i.e. "
-        "within one expand_nodes result, among children of the same node). "
+        "within one list_children result, among children of the same node). "
         "Absolute thresholds are not meaningful and scores across different "
         "parents are not directly comparable — a 0.45 among one parent's "
         "children may signal a strong match, while a 0.55 among a different "
@@ -141,18 +147,31 @@ def build_instructions(
         "conversational framing, so it can differ in phrasing while pointing "
         "at the same intent.\n\n"
         "Tools you may call:\n"
-        f"  * expand_nodes(node_refs): pass up to "
+        f"  * list_children(node_refs): pass up to "
         f"{settings.tool_node_id_max_count} node refs (each starts with 'n:'); "
-        "receive each node's immediate children. Use this to descend toward "
+        "receive each node's immediate children as summaries (title, tags, "
+        "topical/entity labels, similarity score). Use this to descend toward "
         "relevant subtrees. You may select refs from different subtrees in a "
-        "single call.\n"
-        f"  * fetch_blob_contents(blob_refs): inspect plaintext of one or "
-        f"more blobs (up to {settings.max_returned_blobs} refs per call; each "
-        "starts with 'b:'). Use this when you're at the blob level and want "
-        "to confirm relevance before finalising. Does not count against the "
-        f"descent budget but is capped at {settings.max_blob_content_fetches} "
-        "total calls per query.\n\n"
-        f"Descent budget: you have {budget} expand_nodes calls for this query. "
+        "single call. This is the only tool that spends descent budget.\n"
+        "  * node_detail(node_ref): fetch one node's longer prose (summary, "
+        "key questions, key claims) that the listing omits. Use it when a "
+        "node's summary looks promising and you want a closer look before "
+        "descending. Does not spend descent budget; capped at "
+        f"{settings.max_node_detail_fetches} calls.\n"
+        f"  * peek_blob(blob_refs): read the plaintext of one or more blobs "
+        f"(up to {settings.max_returned_blobs} refs per call; each starts with "
+        "'b:'). Use this at the blob level to confirm relevance before "
+        "finalising. Does not spend descent budget; capped at "
+        f"{settings.max_blob_content_fetches} total calls.\n"
+        "  * list_file_blobs(blob_ref, offset): list the summaries of every "
+        "blob in the SAME SOURCE FILE as a blob you've reached, in document "
+        "order. Tree position and document position differ — a file's other "
+        "fragments may sit in unrelated subtrees. Reach for this after peeking "
+        "a blob you like, to see the rest of its document. Paginated: pass the "
+        "returned `next_offset` to read more (None means no more). Does not "
+        f"spend descent budget; capped at {settings.max_file_blob_listings} "
+        "calls.\n\n"
+        f"Descent budget: you have {budget} list_children calls for this query. "
         "Budget exhaustion raises an error — emit your best answer before then.\n\n"
         "You may BACKTRACK at any point: re-expand a node from earlier in your "
         "exploration if you decide a different branch looks more promising. "
@@ -189,6 +208,11 @@ def build_query_agent(
         instructions=instructions,
         model_settings=model_settings,
         retries=settings.llm_output_retries,
-        tools=[expand_nodes_impl, fetch_blob_contents_impl],
+        tools=[
+            list_children_impl,
+            node_detail_impl,
+            peek_blob_impl,
+            list_file_blobs_impl,
+        ],
     )
     return agent

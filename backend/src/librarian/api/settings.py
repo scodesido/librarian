@@ -46,8 +46,8 @@ class QuerySettings(BaseModel):
     # feedback. Generous default; raise if real questions need it.
     question_max_chars: int = 1000
 
-    # Per-call upper bound on how many node_ids the agent may pass to
-    # `expand_nodes`. The agent is told this limit in its instructions; the
+    # Per-call upper bound on how many node refs the agent may pass to
+    # `list_children`. The agent is told this limit in its instructions; the
     # tool itself enforces it (returning an error the agent can recover from).
     tool_node_id_max_count: int = 3
 
@@ -55,14 +55,27 @@ class QuerySettings(BaseModel):
     # to return fewer; the endpoint truncates if it returns more.
     max_returned_blobs: int = 5
 
-    # Defensive cap on `fetch_blob_contents` calls per request. The agent can
-    # peek at blob content while exploring, but unbounded peeking would defeat
-    # the descent-budget design — this caps the total number of blob-content
+    # Defensive cap on `peek_blob` calls per request. The agent can peek at
+    # blob content while exploring, but unbounded peeking would defeat the
+    # descent-budget design — this caps the total number of blob-content
     # fetches in one query, separately from the descent budget.
     max_blob_content_fetches: int = 15
 
+    # Defensive cap on `node_detail` calls per request (on-demand fetches of a
+    # node's prose Abstract). Separate from the descent budget.
+    max_node_detail_fetches: int = 15
+
+    # Defensive cap on `list_file_blobs` calls per request. Each call returns
+    # one page; this bounds total paging across the query.
+    max_file_blob_listings: int = 15
+
+    # Page size for `list_file_blobs` — how many of a file's blob summaries are
+    # returned per call. A file can hold many blobs, so the tool paginates; the
+    # agent passes the returned `next_offset` to read more.
+    file_blobs_page_size: int = 20
+
     # Descent budget = ceil(C * (root.height + 1)). With C=3 and a height-3
-    # tree, the agent has 12 `expand_nodes` calls — enough to descend three
+    # tree, the agent has 12 `list_children` calls — enough to descend three
     # parallel branches with one branch revisit each.
     descent_budget_multiplier: float = 4.0
 

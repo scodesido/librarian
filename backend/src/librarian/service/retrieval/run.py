@@ -24,14 +24,14 @@ from librarian.service.retrieval.agent import (
 )
 from librarian.service.retrieval.deps import QueryDeps
 from librarian.service.retrieval.events import (
-    BlobResult,
     DoneEvent,
     QueryEvent,
+    ResultBlob,
     TermsEvent,
 )
 from librarian.service.retrieval.preflight import QueryPreflight
 from librarian.service.retrieval.providers import build_blob_provider
-from librarian.service.retrieval.tools import resolve_blob_results
+from librarian.service.retrieval.resolve import resolve_result_blobs
 from librarian.service.usage import agent_usage, record_usage
 
 logger = logging.getLogger(__name__)
@@ -42,15 +42,14 @@ Emit = Callable[[QueryEvent], Awaitable[None]]
 @dataclass
 class RetrievalResult:
     """Final shape produced by run_retrieval. Mirrors DoneEvent's payload —
-    the SSE wrapper emits a DoneEvent built from this, the JSON endpoint
-    maps it onto QueryResponse, and the MCP tool projects a subset of it.
+    the SSE wrapper emits a DoneEvent built from this, the JSON endpoint maps
+    it onto QueryResponse, and the MCP tool turns the blobs into content
+    blocks.
     """
 
-    blobs: list[BlobResult]
-    visited_node_ids: list[int]
-    steps: int
     rationale: str
     effective_search_terms: str
+    blobs: list[ResultBlob]
 
 
 async def setup_query(
@@ -148,12 +147,14 @@ async def run_retrieval(
     preflight: QueryPreflight,
     creds: UserCredentials,
     emit: Emit | None,
+    binary: bool = False,
 ) -> RetrievalResult:
     """Shared retrieval driver: set up per-request state on `conn`, run the
-    agent to completion, resolve the chosen blob_ids into BlobResults. If
-    `emit` is provided, the lifecycle events (TermsEvent first, ExpandEvent /
-    FetchEvent during the agent loop, DoneEvent at the end) are pushed
-    through it; otherwise the function is silent until it returns.
+    agent to completion, resolve the chosen blob_ids into ResultBlobs (text or
+    base64 bytes per `binary`). If
+    `emit` is provided, the lifecycle events (TermsEvent first, one
+    ProgressEvent per tool call during the agent loop, DoneEvent at the end)
+    are pushed through it; otherwise the function is silent until it returns.
 
     Caller chooses the connection. The JSON endpoint passes the request-
     scoped conn directly; the SSE generator and the MCP tool acquire their
@@ -192,22 +193,18 @@ async def run_retrieval(
     blob_ids = cap_blob_ids(
         parse_final_blob_refs(final.blob_refs), settings.query.max_returned_blobs
     )
-    blobs = await resolve_blob_results(deps, blob_ids)
+    blobs = await resolve_result_blobs(deps, blob_ids, binary)
     retrieval = RetrievalResult(
-        blobs=blobs,
-        visited_node_ids=list(deps.visited_node_ids),
-        steps=deps.step_count,
         rationale=final.rationale,
         effective_search_terms=preflight.effective_search_terms,
+        blobs=blobs,
     )
     if emit is not None:
         await emit(
             DoneEvent(
-                blobs=retrieval.blobs,
-                visited_node_ids=retrieval.visited_node_ids,
-                steps=retrieval.steps,
                 rationale=retrieval.rationale,
                 effective_search_terms=retrieval.effective_search_terms,
+                blobs=retrieval.blobs,
             )
         )
     return retrieval

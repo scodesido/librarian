@@ -19,48 +19,23 @@ const QUESTION_STORAGE_KEY = "librarian.search_question";
 // for now — bump both sides if the question budget grows.
 const QUESTION_MAX_CHARS = 1000;
 
-interface AbstractFields {
-  summary?: string;
-  title?: string;
-  topics?: string[];
-  intended_audience?: string;
-  content_type?: string[];
-  domains?: string[];
+// The whole of what the backend exposes about a node/blob the agent touched
+// mid-walk: a display title and its flat tag list. No ids, no scores.
+interface Brief {
+  title: string | null;
+  tags: string[];
 }
 
-interface BlobResult {
-  blob_id: number;
-  file_id: number;
-  file_path: string;
-  file_start: number;
-  file_end: number;
-  abstract: AbstractFields;
+// One selected fragment. The webapp always queries in text mode, so `content`
+// is plaintext and `encoding` is "text"; the binary fields exist only for
+// API/MCP callers.
+interface ResultBlob {
+  title: string | null;
+  file_name: string;
+  tags: string[];
+  mime_type: string;
   content: string;
-}
-
-interface NodeChildView {
-  kind: "node";
-  node_id: number;
-  height: number;
-  abstract: AbstractFields | null;
-  blob_count: number | null;
-}
-
-interface BlobChildView {
-  kind: "blob";
-  blob_id: number;
-  abstract: AbstractFields;
-  file_id: number;
-  file_blob_index: number;
-  file_start: number;
-  file_end: number;
-}
-
-type ChildView = NodeChildView | BlobChildView;
-
-interface ExpandedNode {
-  node_id: number;
-  children: ChildView[];
+  encoding: "text" | "base64";
 }
 
 interface TermsEvent {
@@ -69,25 +44,19 @@ interface TermsEvent {
   extracted: boolean;
 }
 
-interface ExpandEvent {
-  kind: "expand";
-  step: number;
-  budget: number;
-  requested_node_ids: number[];
-  expanded: ExpandedNode[];
-}
-
-interface FetchEvent {
-  kind: "fetch";
-  blob_ids: number[];
+interface ProgressEvent {
+  kind: "progress";
+  action: "descend" | "detail" | "peek" | "file";
+  items: Brief[];
+  step: number | null;
+  budget: number | null;
 }
 
 interface DoneEvent {
   kind: "done";
-  blobs: BlobResult[];
-  visited_node_ids: number[];
-  steps: number;
   rationale: string;
+  effective_search_terms: string;
+  blobs: ResultBlob[];
 }
 
 interface ErrorEvent {
@@ -95,16 +64,30 @@ interface ErrorEvent {
   detail: string;
 }
 
-type QueryEvent =
-  | TermsEvent
-  | ExpandEvent
-  | FetchEvent
-  | DoneEvent
-  | ErrorEvent;
+type QueryEvent = TermsEvent | ProgressEvent | DoneEvent | ErrorEvent;
 
-function topicsLine(topics: string[] | undefined): string {
-  if (topics === undefined || topics.length === 0) return "(no topics)";
-  return topics.join(" · ");
+const PROGRESS_VERBS: Record<ProgressEvent["action"], string> = {
+  descend: "Descended into",
+  detail: "Inspected node",
+  peek: "Peeked at",
+  file: "Listed file fragments",
+};
+
+function Tags({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null;
+  return (
+    <Group gap={4}>
+      {tags.map((tag) => (
+        <Badge key={tag} variant="light" size="sm">
+          {tag}
+        </Badge>
+      ))}
+    </Group>
+  );
+}
+
+function briefLabel(item: Brief): string {
+  return item.title ?? "(untitled)";
 }
 
 function TermsTimelineItem({ event }: { event: TermsEvent }) {
@@ -123,62 +106,43 @@ function TermsTimelineItem({ event }: { event: TermsEvent }) {
   );
 }
 
-function ExpandTimelineItem({ event }: { event: ExpandEvent }) {
+function progressTitle(event: ProgressEvent): string {
+  if (event.action === "descend" && event.step !== null) {
+    return `Step ${event.step}/${event.budget} — descended into ${event.items.length} node(s)`;
+  }
+  return `${PROGRESS_VERBS[event.action]} (${event.items.length})`;
+}
+
+function ProgressTimelineItem({ event }: { event: ProgressEvent }) {
   return (
-    <Timeline.Item
-      title={`Step ${event.step}/${event.budget} — expanded ${event.requested_node_ids.length} node(s)`}
-    >
+    <Timeline.Item title={progressTitle(event)}>
       <Stack gap={4}>
-        {event.expanded.map((node) => (
-          <Text size="sm" key={node.node_id} c="dimmed">
-            node #{node.node_id} →{" "}
-            {node.children.length === 0
-              ? "(no children)"
-              : node.children
-                  .slice(0, 5)
-                  .map((c) =>
-                    c.kind === "node"
-                      ? `node #${c.node_id} [${topicsLine(c.abstract?.topics)}]`
-                      : `blob #${c.blob_id} [${topicsLine(c.abstract.topics)}]`,
-                  )
-                  .join(" · ")}
-            {node.children.length > 5 && " · …"}
-          </Text>
+        {event.items.map((item, idx) => (
+          <Group key={idx} gap="xs" wrap="nowrap">
+            <Text size="sm" c="dimmed">
+              {briefLabel(item)}
+            </Text>
+            <Tags tags={item.tags} />
+          </Group>
         ))}
       </Stack>
     </Timeline.Item>
   );
 }
 
-function FetchTimelineItem({ event }: { event: FetchEvent }) {
-  return (
-    <Timeline.Item title={`Peeked at ${event.blob_ids.length} blob content(s)`}>
-      <Text size="sm" c="dimmed">
-        blob_ids: {event.blob_ids.join(", ")}
-      </Text>
-    </Timeline.Item>
-  );
-}
-
-function BlobResultCard({ blob }: { blob: BlobResult }) {
-  const range = `[${blob.file_start}, ${blob.file_end})`;
+function BlobResultCard({ blob }: { blob: ResultBlob }) {
   return (
     <Card withBorder shadow="xs" padding="md">
       <Stack gap="xs">
         <Group justify="space-between" align="flex-start">
           <Stack gap={2}>
-            <Text fw={500}>
-              {blob.abstract.title ?? `blob #${blob.blob_id}`}
-            </Text>
+            <Text fw={500}>{blob.title ?? "(untitled)"}</Text>
             <Text size="xs" c="dimmed">
-              blob #{blob.blob_id} · file #{blob.file_id} · range {range}
+              {blob.file_name}
             </Text>
           </Stack>
-          <Badge variant="light">{topicsLine(blob.abstract.topics)}</Badge>
+          <Tags tags={blob.tags} />
         </Group>
-        {blob.abstract.summary !== undefined && (
-          <Text size="sm">{blob.abstract.summary}</Text>
-        )}
         <Spoiler maxHeight={80} showLabel="Show content" hideLabel="Hide">
           <Code block style={{ whiteSpace: "pre-wrap" }}>
             {blob.content}
@@ -314,10 +278,8 @@ function SearchPanel() {
               {events.map((ev, idx) =>
                 ev.kind === "terms" ? (
                   <TermsTimelineItem key={idx} event={ev} />
-                ) : ev.kind === "expand" ? (
-                  <ExpandTimelineItem key={idx} event={ev} />
-                ) : ev.kind === "fetch" ? (
-                  <FetchTimelineItem key={idx} event={ev} />
+                ) : ev.kind === "progress" ? (
+                  <ProgressTimelineItem key={idx} event={ev} />
                 ) : null,
               )}
             </Timeline>
@@ -327,17 +289,10 @@ function SearchPanel() {
 
       {done !== null && (
         <Stack gap="xs">
-          <Group justify="space-between">
-            <Text fw={500}>
-              Results ({done.blobs.length} blob
-              {done.blobs.length === 1 ? "" : "s"})
-            </Text>
-            <Text size="xs" c="dimmed">
-              {done.steps} step{done.steps === 1 ? "" : "s"} ·{" "}
-              {done.visited_node_ids.length} node
-              {done.visited_node_ids.length === 1 ? "" : "s"} visited
-            </Text>
-          </Group>
+          <Text fw={500}>
+            Results ({done.blobs.length} blob
+            {done.blobs.length === 1 ? "" : "s"})
+          </Text>
           {done.rationale.length > 0 && (
             <Text size="sm" c="dimmed" fs="italic">
               {done.rationale}
@@ -348,8 +303,8 @@ function SearchPanel() {
               The agent did not find any relevant blobs in this library.
             </Text>
           )}
-          {done.blobs.map((blob) => (
-            <BlobResultCard key={blob.blob_id} blob={blob} />
+          {done.blobs.map((blob, idx) => (
+            <BlobResultCard key={idx} blob={blob} />
           ))}
         </Stack>
       )}

@@ -453,6 +453,7 @@ CREATE TABLE public.data_files (
     type text NOT NULL,
     source_modified_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    name text DEFAULT ''::text NOT NULL,
     CONSTRAINT data_files_source_check CHECK ((source = 'GDRIVE'::text)),
     CONSTRAINT data_files_type_check CHECK ((type = ANY (ARRAY['PDF'::text, 'TEXT'::text, 'OTHER'::text])))
 );
@@ -1726,4 +1727,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('202605180007'),
     ('202605260001'),
     ('202605290001'),
-    ('202606020001');
+    ('202606020001'),
+    ('202606030001');
