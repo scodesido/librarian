@@ -38,6 +38,8 @@ for specific use cases - we try to follow a logic of code locality, "define wher
 We use dbmate. All migrations must be created by the user, not yourself - if you need a new one, ask the user to create a new,
 empty migration file (under backend/db/migrations/) and then fill it in as needed.
 
+Migrations are meant to affect schema - do not write data-affecting migrations such as UPDATEs, DELETEs, TRUNCATEs, etc.
+
 # Frontend React style
 
 It is meant to be a simple frontend. The ideas about small files, descriptive names, and code locality still applies.

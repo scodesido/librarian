@@ -331,6 +331,22 @@ async def fetch_blob_file_id(
     )
 
 
+async def fetch_blob_abstract(
+    conn: PoolConnectionProxy, user_id: int, blob_id: int
+) -> dict[str, Any] | None:
+    """A blob's stored Abstract, or None if the blob doesn't exist for this
+    user. The blob analogue of `fetch_node_abstract`: `blob_detail` reads it to
+    project the prose fields (summary, key_questions, key_claims,
+    running_summary) the summary listings omit.
+    """
+    record = await conn.fetchrow(
+        "SELECT abstract FROM data_blobs WHERE user_id = $1 AND blob_id = $2",
+        user_id,
+        blob_id,
+    )
+    return None if record is None else record["abstract"]
+
+
 async def fetch_file_blobs_scored(
     conn: PoolConnectionProxy,
     user_id: int,

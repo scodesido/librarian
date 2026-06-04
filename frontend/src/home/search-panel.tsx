@@ -46,7 +46,7 @@ interface TermsEvent {
 
 interface ProgressEvent {
   kind: "progress";
-  action: "descend" | "detail" | "peek" | "file";
+  action: "descend" | "detail" | "blob_detail" | "peek" | "file";
   items: Brief[];
   step: number | null;
   budget: number | null;
@@ -69,6 +69,7 @@ type QueryEvent = TermsEvent | ProgressEvent | DoneEvent | ErrorEvent;
 const PROGRESS_VERBS: Record<ProgressEvent["action"], string> = {
   descend: "Descended into",
   detail: "Inspected node",
+  blob_detail: "Inspected fragment",
   peek: "Peeked at",
   file: "Listed file fragments",
 };

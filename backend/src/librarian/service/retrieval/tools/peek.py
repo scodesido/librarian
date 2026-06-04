@@ -7,6 +7,7 @@ from librarian.db.tree_children import InvalidBlobRefError, parse_blob_ref
 from librarian.service.retrieval.deps import QueryDeps
 from librarian.service.retrieval.events import Brief, ProgressEvent
 from librarian.service.retrieval.projection import abstract_tags, abstract_title
+from librarian.service.retrieval.provenance import ensure_refs_seen
 from librarian.service.retrieval.resolve import load_blobs
 from librarian.service.retrieval.tools.errors import UnknownBlobIdsError
 
@@ -59,8 +60,11 @@ async def peek_blob_impl(
         except InvalidBlobRefError as exc:
             raise ModelRetry(str(exc)) from exc
 
+    ensure_refs_seen(deps, blob_refs)
+
     try:
-        loaded = await load_blobs(deps, blob_ids)
+        async with deps.db_lock:
+            loaded = await load_blobs(deps, blob_ids)
     except UnknownBlobIdsError as exc:
         raise ModelRetry(str(exc)) from exc
 

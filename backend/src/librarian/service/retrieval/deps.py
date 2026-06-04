@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 import numpy as np
@@ -43,4 +44,21 @@ class QueryDeps:
     step_count: int = 0
     content_fetch_count: int = 0
     detail_fetch_count: int = 0
+    blob_detail_fetch_count: int = 0
     file_listing_count: int = 0
+    # Serialises access to the single shared `conn`. pydantic-ai runs the tool
+    # calls of one model turn concurrently (asyncio.gather), but an asyncpg
+    # connection cannot be used by two coroutines at once ("another operation is
+    # in progress"). Every tool holds this lock around its DB work, so parallel
+    # tool calls queue on the connection instead of colliding. Per-request, so
+    # it only serialises one query's own tools — never across requests.
+    db_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Every node/blob ref the agent has actually been shown — the seed's refs
+    # at construction, then every ref returned by list_children / list_file_blobs
+    # as the walk proceeds. The tools reject any ref not in this set (see
+    # `provenance.py`): node and blob id spaces are disjoint at the DB level
+    # (shared sequence), so a fabricated ref can't accidentally resolve to the
+    # wrong kind — but it could still name a real same-kind element the agent
+    # never saw, and the agent could hallucinate one outright. Gating on
+    # provenance closes both: a ref the agent didn't reach by descent is refused.
+    seen_refs: set[str] = field(default_factory=set)

@@ -14,6 +14,7 @@ from librarian.db.tree_children import (
 from librarian.service.retrieval.deps import QueryDeps
 from librarian.service.retrieval.events import Brief, ProgressEvent
 from librarian.service.retrieval.projection import abstract_tags, abstract_title
+from librarian.service.retrieval.provenance import ensure_refs_seen, record_seen_refs
 from librarian.service.retrieval.tools.errors import BudgetExceededError
 from librarian.service.retrieval.views import ChildSummary, child_summary
 
@@ -66,29 +67,36 @@ async def list_children_impl(
         except InvalidNodeRefError as exc:
             raise ModelRetry(str(exc)) from exc
 
-    nodes: list[NodeRow] = []
-    for nid, ref in zip(node_ids, node_refs, strict=True):
-        row = await fetch_node_row(deps.conn, deps.user_id, nid)
-        if row is None:
-            raise ModelRetry(f"node ref {ref!r} does not match any node for this user")
-        nodes.append(row)
+    ensure_refs_seen(deps, node_refs)
 
+    nodes: list[NodeRow] = []
     expanded: list[ExpandedChildren] = []
     briefs: list[Brief] = []
-    for node, ref in zip(nodes, node_refs, strict=True):
-        children = await fetch_children_scored(
-            deps.conn, deps.user_id, node, deps.search_embedding
-        )
-        expanded.append(
-            ExpandedChildren(
-                parent_ref=ref,
-                children=[child_summary(c) for c in children],
+    async with deps.db_lock:
+        for nid, ref in zip(node_ids, node_refs, strict=True):
+            row = await fetch_node_row(deps.conn, deps.user_id, nid)
+            if row is None:
+                raise ModelRetry(
+                    f"node ref {ref!r} does not match any node for this user"
+                )
+            nodes.append(row)
+
+        for node, ref in zip(nodes, node_refs, strict=True):
+            children = await fetch_children_scored(
+                deps.conn, deps.user_id, node, deps.search_embedding
             )
-        )
-        abstract = await fetch_node_abstract(deps.conn, deps.user_id, node.node_id)
-        briefs.append(
-            Brief(title=abstract_title(abstract), tags=abstract_tags(abstract))
-        )
+            expanded.append(
+                ExpandedChildren(
+                    parent_ref=ref,
+                    children=[child_summary(c) for c in children],
+                )
+            )
+            abstract = await fetch_node_abstract(deps.conn, deps.user_id, node.node_id)
+            briefs.append(
+                Brief(title=abstract_title(abstract), tags=abstract_tags(abstract))
+            )
+
+    record_seen_refs(deps, (child.ref for ec in expanded for child in ec.children))
 
     deps.step_count += 1
 

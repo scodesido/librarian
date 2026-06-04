@@ -12,6 +12,7 @@ from librarian.db.tree_children import (
 from librarian.service.retrieval.deps import QueryDeps
 from librarian.service.retrieval.events import Brief, ProgressEvent
 from librarian.service.retrieval.projection import abstract_tags, abstract_title
+from librarian.service.retrieval.provenance import ensure_refs_seen, record_seen_refs
 from librarian.service.retrieval.views import BlobSummary, blob_summary
 
 logger = logging.getLogger(__name__)
@@ -57,16 +58,21 @@ async def list_file_blobs_impl(
     except InvalidBlobRefError as exc:
         raise ModelRetry(str(exc)) from exc
 
-    file_id = await fetch_blob_file_id(deps.conn, deps.user_id, blob_id)
+    ensure_refs_seen(deps, [blob_ref])
+
+    async with deps.db_lock:
+        file_id = await fetch_blob_file_id(deps.conn, deps.user_id, blob_id)
     if file_id is None:
         raise ModelRetry(f"blob ref {blob_ref!r} does not match any blob for this user")
     deps.file_listing_count += 1
 
     page_size = deps.settings.file_blobs_page_size
-    rows, total = await fetch_file_blobs_scored(
-        deps.conn, deps.user_id, file_id, deps.search_embedding, page_size, offset
-    )
+    async with deps.db_lock:
+        rows, total = await fetch_file_blobs_scored(
+            deps.conn, deps.user_id, file_id, deps.search_embedding, page_size, offset
+        )
     blobs = [blob_summary(r) for r in rows]
+    record_seen_refs(deps, (b.ref for b in blobs))
     next_offset = offset + len(rows) if offset + len(rows) < total else None
 
     logger.info(

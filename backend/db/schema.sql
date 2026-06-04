@@ -523,11 +523,23 @@ CREATE TABLE public.data_blob_file_embeddings (
 
 
 --
+-- Name: data_tree_element_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.data_tree_element_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
 -- Name: data_blobs; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.data_blobs (
-    blob_id bigint NOT NULL,
+    blob_id bigint DEFAULT nextval('public.data_tree_element_id_seq'::regclass) NOT NULL,
     user_id bigint NOT NULL,
     file_id bigint NOT NULL,
     file_blob_index integer NOT NULL,
@@ -722,7 +734,7 @@ ALTER SEQUENCE public.data_node_weights_node_weight_id_seq OWNED BY public.data_
 --
 
 CREATE TABLE public.data_nodes (
-    node_id bigint NOT NULL,
+    node_id bigint DEFAULT nextval('public.data_tree_element_id_seq'::regclass) NOT NULL,
     user_id bigint NOT NULL,
     is_root boolean DEFAULT false NOT NULL,
     height integer NOT NULL,
@@ -967,13 +979,6 @@ ALTER TABLE ONLY public.data_blob_edges ALTER COLUMN blob_edge_id SET DEFAULT ne
 
 
 --
--- Name: data_blobs blob_id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.data_blobs ALTER COLUMN blob_id SET DEFAULT nextval('public.data_blobs_blob_id_seq'::regclass);
-
-
---
 -- Name: data_files file_id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -999,13 +1004,6 @@ ALTER TABLE ONLY public.data_node_edges ALTER COLUMN node_edge_id SET DEFAULT ne
 --
 
 ALTER TABLE ONLY public.data_node_weights ALTER COLUMN node_weight_id SET DEFAULT nextval('public.data_node_weights_node_weight_id_seq'::regclass);
-
-
---
--- Name: data_nodes node_id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.data_nodes ALTER COLUMN node_id SET DEFAULT nextval('public.data_nodes_node_id_seq'::regclass);
 
 
 --
@@ -1973,4 +1971,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('202605290001'),
     ('202606020001'),
     ('202606030001'),
-    ('202606040001');
+    ('202606040001'),
+    ('202606040002');

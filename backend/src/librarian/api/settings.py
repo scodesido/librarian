@@ -74,6 +74,11 @@ class QuerySettings(BaseModel):
     # node's prose Abstract). Separate from the descent budget.
     max_node_detail_fetches: int = 15
 
+    # Defensive cap on `blob_detail` calls per request (on-demand fetches of a
+    # blob's prose Abstract — the cheap inspection tier the agent uses before
+    # committing to a full-text `peek_blob`). Separate from the descent budget.
+    max_blob_detail_fetches: int = 15
+
     # Defensive cap on `list_file_blobs` calls per request. Each call returns
     # one page; this bounds total paging across the query.
     max_file_blob_listings: int = 15

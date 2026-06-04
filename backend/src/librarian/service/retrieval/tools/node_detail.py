@@ -16,6 +16,7 @@ from librarian.service.retrieval.projection import (
     abstract_title,
     detail_abstract,
 )
+from librarian.service.retrieval.provenance import ensure_refs_seen
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ async def node_detail_impl(
     except InvalidNodeRefError as exc:
         raise ModelRetry(str(exc)) from exc
 
-    abstract = await fetch_node_abstract(deps.conn, deps.user_id, node_id)
+    ensure_refs_seen(deps, [node_ref])
+
+    async with deps.db_lock:
+        abstract = await fetch_node_abstract(deps.conn, deps.user_id, node_id)
     if abstract is None:
         raise ModelRetry(
             f"node ref {node_ref!r} does not match any node with an abstract "

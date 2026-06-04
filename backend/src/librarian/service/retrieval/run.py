@@ -13,6 +13,7 @@ from librarian.common.oauth.google.access import NoGoogleAuthError
 from librarian.db.tree_children import (
     InvalidBlobRefError,
     fetch_node_row,
+    node_ref,
     parse_blob_ref,
 )
 from librarian.service.credentials import UserCredentials
@@ -96,6 +97,14 @@ async def setup_query(
     )
     instructions = build_instructions(settings.query, budget, seed)
 
+    # Seed the provenance set with exactly the refs the instructions expose: the
+    # root and its immediate children. These are the only refs the agent can
+    # legitimately pass before its first descent; every later ref is recorded by
+    # the tool that surfaces it. See provenance.py / docs/20.
+    seen_refs = {node_ref(root.node_id)} | {
+        child["ref"] for child in seed["root_children"]
+    }
+
     deps = QueryDeps(
         conn=conn,
         http=http,
@@ -105,6 +114,7 @@ async def setup_query(
         budget=budget,
         search_embedding=search_embedding,
         emit=emit,
+        seen_refs=seen_refs,
     )
     return deps, instructions
 
@@ -122,6 +132,24 @@ def cap_blob_ids(blob_ids: list[int], cap: int) -> list[int]:
         cap,
     )
     return blob_ids[:cap]
+
+
+def drop_unseen_final_refs(blob_refs: list[str], seen_refs: set[str]) -> list[str]:
+    """Drop any final-answer ref the agent was never shown during the walk (a
+    hallucination). Provenance is enforced on every tool input, but the
+    FinalAnswer bypasses the tools, so it's the last fabrication surface: a
+    legitimately chosen blob was peeked and is therefore in `seen_refs`. We drop
+    rather than fail the whole query — mirrors cap_blob_ids' defensive trim.
+    """
+    kept = [ref for ref in blob_refs if ref in seen_refs]
+    dropped = [ref for ref in blob_refs if ref not in seen_refs]
+    if dropped:
+        logger.warning(
+            "retrieval: dropping %d final blob ref(s) the agent never saw: %s",
+            len(dropped),
+            dropped,
+        )
+    return kept
 
 
 def parse_final_blob_refs(blob_refs: list[str]) -> list[int]:
@@ -190,8 +218,9 @@ async def run_retrieval(
         agent_usage(result),
     )
     final = result.output
+    seen_final_refs = drop_unseen_final_refs(final.blob_refs, deps.seen_refs)
     blob_ids = cap_blob_ids(
-        parse_final_blob_refs(final.blob_refs), settings.query.max_returned_blobs
+        parse_final_blob_refs(seen_final_refs), settings.query.max_returned_blobs
     )
     blobs = await resolve_result_blobs(deps, blob_ids, binary)
     retrieval = RetrievalResult(

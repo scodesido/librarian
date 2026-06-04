@@ -38,7 +38,7 @@ class ProgressEvent(BaseModel):
     """
 
     kind: Literal["progress"] = "progress"
-    action: Literal["descend", "detail", "peek", "file"]
+    action: Literal["descend", "detail", "blob_detail", "peek", "file"]
     items: list[Brief]
     step: int | None = None
     budget: int | None = None

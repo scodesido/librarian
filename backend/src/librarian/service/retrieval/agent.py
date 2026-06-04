@@ -17,6 +17,7 @@ from librarian.db.tree_children import (
 from librarian.service.credentials import ModelCreds
 from librarian.service.llm import build_llm_model
 from librarian.service.retrieval.deps import QueryDeps
+from librarian.service.retrieval.tools.blob_detail import blob_detail_impl
 from librarian.service.retrieval.tools.children import list_children_impl
 from librarian.service.retrieval.tools.file_blobs import list_file_blobs_impl
 from librarian.service.retrieval.tools.node_detail import node_detail_impl
@@ -166,16 +167,25 @@ def build_instructions(
         "node's summary looks promising and you want a closer look before "
         "descending. Does not spend descent budget; capped at "
         f"{settings.max_node_detail_fetches} calls.\n"
-        f"  * peek_blob(blob_refs): read the plaintext of one or more blobs "
+        "  * blob_detail(blob_ref): the blob counterpart of node_detail — fetch "
+        "one blob's prose Abstract fields (summary, key questions, key claims, "
+        "running summary) that the summary listings omit. This is the CHEAP way "
+        "to inspect a blob; prefer it for triage. Does not spend descent "
+        f"budget; capped at {settings.max_blob_detail_fetches} calls.\n"
+        f"  * peek_blob(blob_refs): read the full plaintext of one or more blobs "
         f"(up to {settings.max_returned_blobs} refs per call; each starts with "
-        "'b:'). Use this at the blob level to confirm relevance before "
-        "finalising. Does not spend descent budget; capped at "
-        f"{settings.max_blob_content_fetches} total calls.\n"
+        "'b:'). This is your most expensive tool — use it SPARINGLY, only to "
+        "confirm the handful of candidates you've already narrowed down via "
+        "summaries and blob_detail. Do NOT peek blobs by default or peek "
+        "everything you encounter; a blob's summary and blob_detail are usually "
+        "enough to judge relevance, and you peek only when you need the actual "
+        "text to be sure before finalising. Does not spend descent budget; "
+        f"capped at {settings.max_blob_content_fetches} total calls.\n"
         "  * list_file_blobs(blob_ref, offset): list the summaries of every "
         "blob in the SAME SOURCE FILE as a blob you've reached, in document "
         "order. Tree position and document position differ — a file's other "
-        "fragments may sit in unrelated subtrees. Reach for this after peeking "
-        "a blob you like, to see the rest of its document. Paginated: pass the "
+        "fragments may sit in unrelated subtrees. Reach for this once you've "
+        "found a blob you like, to see the rest of its document. Paginated: pass the "
         "returned `next_offset` to read more (None means no more). Does not "
         f"spend descent budget; capped at {settings.max_file_blob_listings} "
         "calls.\n\n"
@@ -225,6 +235,7 @@ def build_query_agent(
         tools=[
             list_children_impl,
             node_detail_impl,
+            blob_detail_impl,
             peek_blob_impl,
             list_file_blobs_impl,
         ],
