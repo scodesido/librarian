@@ -9,7 +9,6 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { api } from "../api/client";
 
 interface AbstractFields {
   summary?: string;
@@ -179,7 +178,17 @@ function BlobChildCard({ child }: { child: BlobChildView }) {
 // root" (nodeId === null) rather than fetching node #-1.
 const ROOT_HISTORY_MARKER = -1;
 
-function TreeExplorer() {
+// `loadNode` decouples the explorer from where the tree comes from: the user
+// app passes a loader hitting /data/tree (session-scoped), the admin panel one
+// hitting /admin/tree?user_id=… It must be referentially stable (e.g. a
+// useCallback) — it's an effect dependency, so a new identity each render would
+// refetch in a loop. Switching the underlying user is done by remounting with a
+// `key`, which resets the navigation state to the root.
+function TreeExplorer({
+  loadNode,
+}: {
+  loadNode: (nodeId: number | null) => Promise<Response>;
+}) {
   const [nodeId, setNodeId] = useState<number | null>(null);
   const [history, setHistory] = useState<number[]>([]);
   const [view, setView] = useState<NodeView | null>(null);
@@ -198,9 +207,7 @@ function TreeExplorer() {
     let cancelled = false;
     void (async () => {
       try {
-        const path =
-          nodeId === null ? "/data/tree/node" : `/data/tree/node/${nodeId}`;
-        const resp = await api(path);
+        const resp = await loadNode(nodeId);
         if (cancelled) return;
         if (resp.status === 404) {
           const detail = await resp
@@ -224,7 +231,7 @@ function TreeExplorer() {
     return () => {
       cancelled = true;
     };
-  }, [nodeId]);
+  }, [nodeId, loadNode]);
 
   const onOpenChild = (childId: number) => {
     const currentMarker =

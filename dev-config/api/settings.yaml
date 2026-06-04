@@ -2,6 +2,20 @@ api:
   host: librarian-api
   port: 8000
   reload: true
+  # The user webapp (:3000) and the admin panel (:3001) are separate dev
+  # origins; the admin panel also sends the X-Admin-Password header, which
+  # must be allow-listed for the CORS preflight to pass.
+  cors_origins:
+    - http://localhost:3000
+    - http://localhost:3001
+  cors_headers:
+    - Authorization
+    - X-Admin-Password
+
+# Adhoc, dev-only password gating the /admin endpoints (the debug panel at
+# :3001). In production the panel sits behind ssh; this is a second gate.
+admin:
+  password: dev-admin
 
 database:
   user: admin

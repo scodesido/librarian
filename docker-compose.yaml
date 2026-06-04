@@ -49,16 +49,32 @@ services:
       timeout: 1s
       retries: 5
 
-  librarian-web:
-    hostname: librarian-web
-    container_name: librarian-web
-    image: librarian-web:dev
+  librarian-webapp:
+    hostname: librarian-webapp
+    container_name: librarian-webapp
+    image: librarian-webapp:dev
     build:
       context: ./frontend
       target: dev
-    command: --host librarian-web
+    command: --host librarian-webapp
     ports:
       - 127.0.0.1:3000:3000
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+
+  librarian-adminpanel:
+    hostname: librarian-adminpanel
+    container_name: librarian-adminpanel
+    image: librarian-adminpanel:dev
+    build:
+      context: ./frontend
+      target: dev
+      args:
+        APP_TARGET: adminpanel
+    command: --host librarian-adminpanel
+    ports:
+      - 127.0.0.1:3001:3000
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public

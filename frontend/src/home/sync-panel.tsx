@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Badge,
   Button,
@@ -9,16 +9,8 @@ import {
   TextInput,
 } from "@mantine/core";
 import { api } from "../api/client";
-
-interface PipelineCounts {
-  files_total: number;
-  files_ready: number;
-  blobs_total: number;
-  blobs_in_tree: number;
-  nodes_total: number;
-  nodes_weighted: number;
-  nodes_abstracted: number;
-}
+import { syncFullyReady } from "./use-pipeline-counts";
+import type { PipelineCounts } from "./use-pipeline-counts";
 
 const PREFIX_STORAGE_KEY = "librarian.sync_prefix";
 const PREFIX_DEFAULT = "/librarian/";
@@ -46,9 +38,13 @@ function StageRow({
   );
 }
 
-function SyncPanel() {
-  const [counts, setCounts] = useState<PipelineCounts | null>(null);
-  const [streamError, setStreamError] = useState<string | null>(null);
+function SyncPanel({
+  counts,
+  streamError,
+}: {
+  counts: PipelineCounts | null;
+  streamError: string | null;
+}) {
   const [prefix, setPrefix] = useState<string>(
     () => localStorage.getItem(PREFIX_STORAGE_KEY) ?? PREFIX_DEFAULT,
   );
@@ -57,19 +53,6 @@ function SyncPanel() {
   const [pendingAction, setPendingAction] = useState<
     "sync" | "rebuild" | "clear" | null
   >(null);
-
-  useEffect(() => {
-    const url = `${API_URL}/data/files/pipeline-counts/stream`;
-    const source = new EventSource(url, { withCredentials: true });
-    source.onmessage = (e) => {
-      setStreamError(null);
-      setCounts(JSON.parse(e.data) as PipelineCounts);
-    };
-    source.onerror = () => {
-      setStreamError("Lost connection to count stream");
-    };
-    return () => source.close();
-  }, []);
 
   const onPrefixChange = (value: string) => {
     setPrefix(value);
@@ -140,14 +123,7 @@ function SyncPanel() {
     runAction("clear", "/data/files/clear", { method: "POST" });
   };
 
-  const fullyReady =
-    counts !== null &&
-    counts.files_total > 0 &&
-    counts.files_ready === counts.files_total &&
-    counts.blobs_total > 0 &&
-    counts.blobs_in_tree === counts.blobs_total &&
-    counts.nodes_total > 0 &&
-    counts.nodes_abstracted === counts.nodes_total;
+  const fullyReady = syncFullyReady(counts);
 
   return (
     <Stack gap="sm">

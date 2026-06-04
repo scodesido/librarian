@@ -3,6 +3,13 @@ FROM node:24-alpine AS dev
 
 WORKDIR /app
 
+# Which app this image serves: "webapp" (default) or "adminpanel". Baked into
+# the image as VITE_APP_TARGET, which `main.tsx` reads to pick the root
+# component. The ENV flows into both `npm run build` below and the dev server
+# launched by the ENTRYPOINT, so one Dockerfile parameterizes both modes.
+ARG APP_TARGET=webapp
+ENV VITE_APP_TARGET=$APP_TARGET
+
 # Copy package dependencies and install
 COPY package.json .
 COPY package-lock.json .

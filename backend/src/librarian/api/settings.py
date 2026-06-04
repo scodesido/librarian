@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from librarian.common.settings.base import YamlSettings
 from librarian.common.settings.embeddings import EmbeddingsSettings
@@ -34,6 +34,15 @@ class ApiSettings(BaseModel):
 
 class CookieSettings(BaseModel):
     session_cookie_name: str = "session_id"
+
+
+class AdminSettings(BaseModel):
+    # Single shared password gating the /admin endpoints (the debug admin
+    # panel: user selector + tree explorer). The panel itself sits behind
+    # ssh, so this is a lightweight second gate, not a user/role system.
+    # Left unset (None) the whole /admin surface refuses every request with
+    # 503 — admin is opt-in per environment, never silently open.
+    password: SecretStr | None = None
 
 
 class DataFilesSettings(BaseModel):
@@ -96,6 +105,7 @@ class Settings(YamlSettings):
     database: PostgresSettings = PostgresSettings()
     http_client: HttpClientSettings = HttpClientSettings()
     cookies: CookieSettings = CookieSettings()
+    admin: AdminSettings = AdminSettings()
     google_oauth: GoogleOAuthSettings = GoogleOAuthSettings()
     data_files: DataFilesSettings = DataFilesSettings()
     query: QuerySettings = QuerySettings()
