@@ -11,13 +11,16 @@ class DataFilesModel(TableModel):
     file_id: int
     user_id: int
     path: str
+    name: str
     source: FileSource
     type: FileType
     source_modified_at: datetime | None
     created_at: datetime
 
 
-SELECT_COLUMNS = "file_id, user_id, path, source, type, source_modified_at, created_at"
+SELECT_COLUMNS = (
+    "file_id, user_id, path, name, source, type, source_modified_at, created_at"
+)
 
 
 class DataFiles(Table):

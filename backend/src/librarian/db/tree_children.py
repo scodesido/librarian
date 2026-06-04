@@ -82,6 +82,13 @@ class BlobChildView(BaseModel):
     file_blob_index: int
     file_start: int
     file_end: int
+    # Human-readable name of the owning file (data_files.name). Populated only
+    # by the unscored tree-explorer fetcher, where it's a debugging aid; the
+    # agent-facing scored fetchers leave it None so the agent's projection (and
+    # its prompt cache) is unaffected. None for files synced before the `name`
+    # column existed (their stored name is the empty string — see the file_paths
+    # migration), surfaced via NULLIF in the query.
+    file_name: str | None = None
     # See NodeChildView.similarity_score. For blobs the similarity is against
     # `embedding_blob` (the text-only vector), not `embedding_with_file` —
     # the file-mixed variant is biased toward grouping same-file blobs and is
@@ -183,9 +190,11 @@ async def fetch_blob_children(
     rows = await conn.fetch(
         """
         SELECT b.blob_id, b.abstract, b.file_id, b.file_blob_index,
-               b.file_start, b.file_end
+               b.file_start, b.file_end,
+               NULLIF(f.name, '') AS file_name
         FROM data_blob_edges e
         JOIN data_blobs b ON b.blob_id = e.child_blob_id
+        JOIN data_files f ON f.file_id = b.file_id
         WHERE e.user_id = $1 AND e.parent_node_id = $2
         ORDER BY b.file_id, b.file_blob_index
         """,
@@ -201,6 +210,7 @@ async def fetch_blob_children(
             file_blob_index=r["file_blob_index"],
             file_start=r["file_start"],
             file_end=r["file_end"],
+            file_name=r["file_name"],
         )
         for r in rows
     ]

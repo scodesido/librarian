@@ -151,7 +151,7 @@ async def run_one_iteration(pool: Pool, http: ClientSession) -> bool:
                 user_id,
                 EventCode.FILE_PROCESSED,
                 "blob_extractor",
-                detail=f"Processed {file.path}",
+                detail=f"Processed {file.name or file.path}",
                 context={"file_id": file.file_id},
             )
             logger.info("blob_extractor: file %s done", file.file_id)

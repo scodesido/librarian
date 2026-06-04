@@ -62,6 +62,7 @@ interface BlobChildView {
   blob_id: number;
   abstract: AbstractFields;
   file_id: number;
+  file_name: string | null;
   file_blob_index: number;
   file_start: number;
   file_end: number;
@@ -164,6 +165,7 @@ function BlobChildCard({ child }: { child: BlobChildView }) {
       <Stack gap={4}>
         <Text fw={500}>{topicsLine(child.abstract.topics)}</Text>
         <TagBadges abstract={child.abstract} size="xs" />
+        {child.file_name !== null && <Text size="xs">{child.file_name}</Text>}
         <Text size="xs" c="dimmed">
           blob #{child.blob_id} · file #{child.file_id} · index{" "}
           {child.file_blob_index} · range [{child.file_start}, {child.file_end})
@@ -223,6 +225,14 @@ function TreeExplorer({
           const data = (await resp.json()) as NodeView;
           setView(data);
           setError(null);
+        }
+      } catch {
+        // loadNode rejected before yielding a Response — backend
+        // unreachable, network drop, or a blocked CORS preflight. Show a
+        // message rather than silently leaving the panel blank.
+        if (!cancelled) {
+          setView(null);
+          setError("Couldn't reach the server.");
         }
       } finally {
         if (!cancelled) setLoading(false);

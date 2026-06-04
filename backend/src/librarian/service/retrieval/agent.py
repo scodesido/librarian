@@ -42,7 +42,15 @@ class FinalAnswer(BaseModel):
         )
     )
     rationale: str = Field(
-        description=("One or two sentences explaining why these blobs were chosen.")
+        description=(
+            "One or two sentences, written for the end user, explaining in "
+            "plain language why these documents answer their question. The "
+            "user has no notion of the library's internals, which are also "
+            "subject to change: never mention refs ('b:'/'n:' strings), node "
+            "or blob ids, Abstract field names, similarity scores, the tree, "
+            "or any other machinery. Speak only about the documents' actual "
+            "content and how it relates to what was asked."
+        )
     )
 
 
@@ -179,7 +187,13 @@ def build_instructions(
         "descent — use them.\n\n"
         f"Final answer: emit a FinalAnswer with up to {settings.max_returned_blobs} "
         "blob_refs (each starts with 'b:') in priority order, plus a short "
-        "rationale. Return fewer if fewer are clearly relevant; do not pad.\n\n"
+        "rationale. Return fewer if fewer are clearly relevant; do not pad.\n"
+        "The rationale is shown directly to the end user, who has no notion of "
+        "this system's internals — and those internals are subject to change. "
+        "So keep it purely semantic: explain in plain language how the chosen "
+        "documents' content answers the question. Never expose internals such "
+        "as refs ('b:'/'n:' strings), node or blob ids, Abstract field names, "
+        "similarity scores, or the tree structure.\n\n"
         "Library seed (root abstract + root's immediate children Abstracts):\n"
         f"{seed_json}"
     )

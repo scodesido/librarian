@@ -34,7 +34,9 @@ async def load_blobs(deps: QueryDeps, blob_ids: list[int]) -> list[LoadedBlob]:
     rows = await deps.conn.fetch(
         """
         SELECT b.blob_id, b.file_id, b.file_start, b.file_end, b.abstract,
-               f.path AS source_path, f.name AS file_name, f.source, f.type
+               f.path AS source_path,
+               COALESCE(NULLIF(f.name, ''), f.path) AS file_name,
+               f.source, f.type
         FROM data_blobs b
         JOIN data_files f ON f.file_id = b.file_id
         WHERE b.user_id = $1 AND b.blob_id = ANY($2)

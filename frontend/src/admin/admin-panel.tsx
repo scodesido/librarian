@@ -33,24 +33,37 @@ function AdminPanel({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const resp = await adminApi("/admin/users");
-      if (cancelled) return;
-      if (resp.status === 401 || resp.status === 403) {
-        onReject("Invalid admin password");
-        return;
+      try {
+        const resp = await adminApi("/admin/users");
+        if (cancelled) return;
+        if (resp.status === 401 || resp.status === 403) {
+          onReject("Invalid admin password");
+          return;
+        }
+        if (resp.status === 503) {
+          setLoadError("Admin panel is not configured on the server.");
+          return;
+        }
+        if (!resp.ok) {
+          setLoadError(`Failed to load users (${resp.status})`);
+          return;
+        }
+        const body = (await resp.json()) as { users: AdminUser[] };
+        if (cancelled) return;
+        setUsers(body.users);
+        setSelected(body.users.length > 0 ? body.users[0].user_id : null);
+      } catch {
+        // A rejected fetch (backend down, network drop, CORS preflight
+        // blocked) never reaches the status checks above, so without this
+        // the panel would hang on the loader with a possibly-stale password
+        // still cached. Surface it instead — the always-visible Log out
+        // button then lets the operator clear the password and retry.
+        if (cancelled) return;
+        setLoadError(
+          "Couldn't reach the API. Check the backend is running and " +
+            "reachable, then log out and back in.",
+        );
       }
-      if (resp.status === 503) {
-        setLoadError("Admin panel is not configured on the server.");
-        return;
-      }
-      if (!resp.ok) {
-        setLoadError(`Failed to load users (${resp.status})`);
-        return;
-      }
-      const body = (await resp.json()) as { users: AdminUser[] };
-      if (cancelled) return;
-      setUsers(body.users);
-      setSelected(body.users.length > 0 ? body.users[0].user_id : null);
     })();
     return () => {
       cancelled = true;
