@@ -12,6 +12,9 @@ api:
     - Authorization
     - X-Admin-Password
 
+oauth_as:
+  public_base_url: "http://localhost:8000"
+
 # Adhoc, dev-only password gating the /admin endpoints (the debug panel at
 # :3001). In production the panel sits behind ssh; this is a second gate.
 admin:

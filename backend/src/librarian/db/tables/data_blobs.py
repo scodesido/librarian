@@ -6,6 +6,14 @@ from numpy.typing import NDArray
 
 from librarian.db.table import Table, TableModel
 
+# embedding_blob and embedding_with_file are deliberately excluded: the
+# former is large and only needed by the file-embedding computation
+# (fetch_embedding_blobs), the latter now lives in data_blob_file_embeddings.
+SELECT_COLUMNS = (
+    "blob_id, user_id, file_id, file_blob_index, file_start, file_end, "
+    "abstract, created_at"
+)
+
 
 class DataBlobsModel(TableModel):
     blob_id: int
@@ -14,8 +22,6 @@ class DataBlobsModel(TableModel):
     file_blob_index: int
     file_start: int
     file_end: int
-    is_final_blob: bool
-    next_blob_id: int | None
     abstract: dict[str, Any]
     created_at: datetime
 
@@ -28,31 +34,55 @@ class DataBlobs(Table):
         file_blob_index: int,
         file_start: int,
         file_end: int,
-        is_final_blob: bool,
-        next_blob_id: int | None,
         embedding_blob: NDArray[np.float32],
-        embedding_with_file: NDArray[np.float32],
         abstract: dict[str, Any],
     ) -> int:
+        """Insert one blob and return its blob_id. Built incrementally,
+        forward (index 0 upward); the DB triggers enforce range-against-
+        manifest and, at commit, a hole-free 0..k prefix.
+        """
         blob_id: int = await self.conn.fetchval(
             (
                 "INSERT INTO data_blobs ("
                 "  user_id, file_id, file_blob_index, file_start, file_end,"
-                "  is_final_blob, next_blob_id,"
-                "  embedding_blob, embedding_with_file, abstract"
-                ") VALUES ("
-                "  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10"
-                ") RETURNING blob_id"
+                "  embedding_blob, abstract"
+                ") VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING blob_id"
             ),
             user_id,
             file_id,
             file_blob_index,
             file_start,
             file_end,
-            is_final_blob,
-            next_blob_id,
             embedding_blob,
-            embedding_with_file,
             abstract,
         )
         return blob_id
+
+    async def fetch_for_file(self, file_id: int) -> list[DataBlobsModel]:
+        """All blobs of a file, ordered by file_blob_index. Used to resume
+        extraction (highest index present), seed the running_summary chain
+        (last blob's abstract), and detect content drift (compare each
+        blob's file_start/file_end against the recomputed chunk).
+        """
+        rows = await self.conn.fetch(
+            f"SELECT {SELECT_COLUMNS} FROM data_blobs "
+            "WHERE file_id = $1 ORDER BY file_blob_index",
+            file_id,
+        )
+        return [DataBlobsModel.model_validate(dict(r)) for r in rows]
+
+    async def fetch_embedding_blobs(
+        self, file_id: int
+    ) -> list[tuple[int, NDArray[np.float32]]]:
+        """(blob_id, embedding_blob) for every blob of a file, ordered by
+        index. The input to the file-relative embedding computation.
+        """
+        rows = await self.conn.fetch(
+            "SELECT blob_id, embedding_blob FROM data_blobs "
+            "WHERE file_id = $1 ORDER BY file_blob_index",
+            file_id,
+        )
+        return [
+            (r["blob_id"], np.asarray(r["embedding_blob"], dtype=np.float32))
+            for r in rows
+        ]

@@ -4,15 +4,15 @@ from librarian.db.tables.data_files import SELECT_COLUMNS, DataFilesModel
 
 
 async def pick_user_with_unready_file(conn: PoolConnectionProxy) -> int | None:
-    """Return the user_id of a random user with at least one PDF/TEXT
-    file that hasn't been chunked into blobs yet. Random picking
-    spreads work across users so a single user with broken credentials
-    (or many pending files) doesn't starve the queue — the next
-    iteration's random pick is just as likely to land on someone else.
+    """Return the user_id of a random user with at least one PDF/TEXT file
+    that isn't fully processed yet. "Fully processed" is the existence of a
+    data_blob_file_embeddings row for the file (written only as a complete
+    set), so "unready" covers everything from "no manifest" through "blobs
+    done but file embeddings missing".
 
-    `random()` re-shuffles the candidate set on every call; under heavy
-    contention this is fine because the result is one user, not a
-    ranked list. None when no user has unready work.
+    Random picking spreads work across users so a single user with broken
+    credentials (or many pending files) doesn't starve the queue. None when
+    no user has unready work.
     """
     record = await conn.fetchrow(
         """
@@ -22,8 +22,8 @@ async def pick_user_with_unready_file(conn: PoolConnectionProxy) -> int | None:
             WHERE f.user_id = u.id
               AND f.type IN ('PDF', 'TEXT')
               AND NOT EXISTS (
-                  SELECT 1 FROM data_blobs b
-                  WHERE b.file_id = f.file_id AND b.is_final_blob
+                  SELECT 1 FROM data_blob_file_embeddings e
+                  WHERE e.file_id = f.file_id
               )
         )
         ORDER BY random()
@@ -36,32 +36,49 @@ async def pick_user_with_unready_file(conn: PoolConnectionProxy) -> int | None:
     return user_id
 
 
-async def claim_next_unready_file_for_user(
+async def claim_unready_file(
     conn: PoolConnectionProxy, user_id: int
 ) -> DataFilesModel | None:
-    """Claim the oldest unready file for `user_id`. FOR UPDATE SKIP
-    LOCKED so parallel workers landing on the same user race naturally
-    on different files; the upstream random user pick is what spreads
-    contention across users.
+    """Claim the oldest unready PDF/TEXT file for `user_id` by taking a
+    session-level advisory lock on (user_id, file_id). Unlike a row
+    `FOR UPDATE`, the advisory lock survives across the many short
+    transactions the incremental extraction runs — it is what keeps a
+    second worker off the same file (and from burning duplicate LLM
+    calls). The caller MUST release it (`pg_advisory_unlock`) when done.
 
-    None when the user's queue was drained between the upstream pick
-    and this call (a parallel worker grabbed the last claimable file).
-    The caller treats this as "no work done" and sleeps for the
-    poll interval before trying again.
+    Iterates oldest-first, skipping files another worker already holds, and
+    re-checks readiness after locking (a parallel worker may have finished
+    the file between the scan and the lock). None when the user's queue is
+    drained or every unready file is locked by someone else.
     """
-    record = await conn.fetchrow(
+    rows = await conn.fetch(
         (
             f"SELECT {SELECT_COLUMNS} FROM data_files f "
             "WHERE f.user_id = $1 "
             "  AND f.type IN ('PDF', 'TEXT') "
             "  AND NOT EXISTS ("
-            "    SELECT 1 FROM data_blobs b "
-            "    WHERE b.file_id = f.file_id AND b.is_final_blob"
+            "    SELECT 1 FROM data_blob_file_embeddings e "
+            "    WHERE e.file_id = f.file_id"
             "  ) "
-            "ORDER BY f.created_at "
-            "LIMIT 1 "
-            "FOR UPDATE SKIP LOCKED"
+            "ORDER BY f.created_at"
         ),
         user_id,
     )
-    return DataFilesModel.from_record(record)
+    for record in rows:
+        file = DataFilesModel.from_record(record)
+        assert file is not None
+        got = await conn.fetchval(
+            "SELECT pg_try_advisory_lock($1, $2)", user_id, file.file_id
+        )
+        if not got:
+            continue
+        still_unready = await conn.fetchval(
+            "SELECT NOT EXISTS("
+            "  SELECT 1 FROM data_blob_file_embeddings WHERE file_id = $1"
+            ")",
+            file.file_id,
+        )
+        if still_unready:
+            return file
+        await conn.execute("SELECT pg_advisory_unlock($1, $2)", user_id, file.file_id)
+    return None

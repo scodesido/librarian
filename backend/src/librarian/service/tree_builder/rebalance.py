@@ -66,7 +66,7 @@ async def list_children(
         rows = await conn.fetch(
             "SELECT e.child_blob_id, b.embedding_with_file "
             "FROM data_blob_edges e "
-            "JOIN data_blobs b ON b.blob_id = e.child_blob_id "
+            "JOIN data_blob_file_embeddings b ON b.blob_id = e.child_blob_id "
             "WHERE e.user_id = $1 AND e.parent_node_id = $2",
             user_id,
             parent_node_id,

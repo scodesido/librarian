@@ -175,7 +175,12 @@ function SyncPanel({
             total={counts.files_total}
           />
           <StageRow
-            label="Blobs"
+            label="Blobs abstracted"
+            current={counts.blobs_total}
+            total={counts.blobs_expected}
+          />
+          <StageRow
+            label="Blobs in tree"
             current={counts.blobs_in_tree}
             total={counts.blobs_total}
           />

@@ -11,8 +11,8 @@ async def pick_user_with_work(conn: PoolConnectionProxy, k: int) -> int | None:
       * a data_nodes row with more than `k` children counting
         data_node_edges + data_blob_edges where it is the parent (split
         pending);
-      * a data_blobs row whose file is ready (has is_final_blob=TRUE) and
-        which lacks a data_blob_edges row (insertion pending).
+      * a data_blob_file_embeddings row (its file is fully processed)
+        whose blob lacks a data_blob_edges row (insertion pending).
 
     Random user picking spreads work across users so the union-all
     candidate set doesn't lean toward whichever user happens to have the
@@ -37,14 +37,10 @@ async def pick_user_with_work(conn: PoolConnectionProxy, k: int) -> int | None:
                    WHERE parent_node_id = n.node_id)
             ) > $1
             UNION ALL
-            SELECT b.user_id
-            FROM data_blobs b
+            SELECT fe.user_id
+            FROM data_blob_file_embeddings fe
             WHERE NOT EXISTS (
-                SELECT 1 FROM data_blob_edges e WHERE e.child_blob_id = b.blob_id
-            )
-            AND EXISTS (
-                SELECT 1 FROM data_blobs bf
-                WHERE bf.file_id = b.file_id AND bf.is_final_blob
+                SELECT 1 FROM data_blob_edges e WHERE e.child_blob_id = fe.blob_id
             )
         ) AS work
         ORDER BY random()

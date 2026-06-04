@@ -13,24 +13,21 @@ async def find_one_ready_unattached_blob(
     """Return (blob_id, embedding_with_file) for the next blob to attach,
     or None if every ready file is fully inserted.
 
-    A blob is eligible iff its file has its final blob present (i.e. the
-    file is "ready") AND the blob itself has no data_blob_edges row yet.
-    Ordering by (file_id, file_blob_index) means we finish all blobs of
-    one file before moving on to the next, and `file_id` being BIGSERIAL
-    makes that ordering stable across worker iterations: a newer file
-    can never pre-empt an in-progress one.
+    A blob is eligible iff it has a data_blob_file_embeddings row (which
+    exists only once its file is fully processed) AND the blob itself has
+    no data_blob_edges row yet. Ordering by (file_id, file_blob_index)
+    means we finish all blobs of one file before moving on to the next,
+    and `file_id` being BIGSERIAL makes that ordering stable across worker
+    iterations: a newer file can never pre-empt an in-progress one.
     """
     record = await conn.fetchrow(
         """
-        SELECT b.blob_id, b.embedding_with_file
-        FROM data_blobs b
-        WHERE b.user_id = $1
+        SELECT fe.blob_id, fe.embedding_with_file
+        FROM data_blob_file_embeddings fe
+        JOIN data_blobs b ON b.blob_id = fe.blob_id
+        WHERE fe.user_id = $1
           AND NOT EXISTS (
-              SELECT 1 FROM data_blob_edges e WHERE e.child_blob_id = b.blob_id
-          )
-          AND EXISTS (
-              SELECT 1 FROM data_blobs bf
-              WHERE bf.file_id = b.file_id AND bf.is_final_blob
+              SELECT 1 FROM data_blob_edges e WHERE e.child_blob_id = fe.blob_id
           )
         ORDER BY b.file_id, b.file_blob_index
         LIMIT 1

@@ -10,7 +10,7 @@ async def pick_user_with_extractable_tree(
 
     "Ready for extraction" is a per-user gate at iteration start (per the
     spec in docs/04.immutable_data_pipeline.md):
-      * every PDF/TEXT file has a final blob;
+      * every PDF/TEXT file is fully processed (has file embeddings);
       * every blob has a data_blob_edges row (in the tree);
       * every node has a data_node_weights row (weighted).
 
@@ -30,8 +30,8 @@ async def pick_user_with_extractable_tree(
             SELECT 1 FROM data_files f
             WHERE f.user_id = u.id AND f.type IN ('PDF', 'TEXT')
               AND NOT EXISTS (
-                  SELECT 1 FROM data_blobs b
-                  WHERE b.file_id = f.file_id AND b.is_final_blob
+                  SELECT 1 FROM data_blob_file_embeddings e
+                  WHERE e.file_id = f.file_id
               )
         )
         AND NOT EXISTS (

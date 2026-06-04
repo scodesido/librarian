@@ -93,15 +93,126 @@ $$;
 
 
 --
--- Name: data_blobs_delete_owning_file(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: data_blob_file_embeddings_check_all_or_none(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.data_blobs_delete_owning_file() RETURNS trigger
+CREATE FUNCTION public.data_blob_file_embeddings_check_all_or_none() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+DECLARE
+    target_file_id BIGINT;
+    n_fe INT;
+    m_expected INT;
 BEGIN
-    DELETE FROM data_files WHERE file_id = OLD.file_id;
+    target_file_id := COALESCE(NEW.file_id, OLD.file_id);
+    SELECT count(*) INTO n_fe
+    FROM data_blob_file_embeddings WHERE file_id = target_file_id;
+    SELECT expected_blob_count INTO m_expected
+    FROM data_file_manifests WHERE file_id = target_file_id;
+    IF n_fe <> 0 AND (m_expected IS NULL OR n_fe <> m_expected) THEN
+        RAISE EXCEPTION
+            'data_blob_file_embeddings for file % must be all-or-none (have %, expected %)',
+            target_file_id, n_fe, m_expected;
+    END IF;
     RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_blob_file_embeddings_check_consistency(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_blob_file_embeddings_check_consistency() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    b_file_id BIGINT;
+    b_user_id BIGINT;
+BEGIN
+    SELECT file_id, user_id INTO b_file_id, b_user_id
+    FROM data_blobs WHERE blob_id = NEW.blob_id;
+    IF b_file_id IS DISTINCT FROM NEW.file_id THEN
+        RAISE EXCEPTION 'data_blob_file_embeddings file_id mismatch with data_blobs';
+    END IF;
+    IF b_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_blob_file_embeddings user_id mismatch with data_blobs';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_blobs_check_against_manifest(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_blobs_check_against_manifest() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    m_user_id BIGINT;
+    m_expected INT;
+BEGIN
+    SELECT user_id, expected_blob_count INTO m_user_id, m_expected
+    FROM data_file_manifests WHERE file_id = NEW.file_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'data_blobs insert for file % has no manifest', NEW.file_id;
+    END IF;
+    IF m_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_blobs user_id mismatch with data_file_manifests';
+    END IF;
+    IF NEW.file_blob_index < 0 OR NEW.file_blob_index >= m_expected THEN
+        RAISE EXCEPTION 'data_blobs file_blob_index % out of range [0, %) for file %',
+            NEW.file_blob_index, m_expected, NEW.file_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: data_blobs_check_contiguous(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_blobs_check_contiguous() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    target_file_id BIGINT;
+    n INT;
+    mn INT;
+    mx INT;
+BEGIN
+    target_file_id := COALESCE(NEW.file_id, OLD.file_id);
+    SELECT count(*), min(file_blob_index), max(file_blob_index)
+    INTO n, mn, mx
+    FROM data_blobs WHERE file_id = target_file_id;
+    IF n > 0 AND (mn <> 0 OR mx <> n - 1) THEN
+        RAISE EXCEPTION
+            'data_blobs for file % are not a contiguous 0..k prefix (count=%, min=%, max=%)',
+            target_file_id, n, mn, mx;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+--
+-- Name: data_file_manifests_check_user_id(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.data_file_manifests_check_user_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    file_user_id BIGINT;
+BEGIN
+    SELECT user_id INTO file_user_id FROM data_files WHERE file_id = NEW.file_id;
+    IF file_user_id IS DISTINCT FROM NEW.user_id THEN
+        RAISE EXCEPTION 'data_file_manifests user_id mismatch with data_files';
+    END IF;
+    RETURN NEW;
 END;
 $$;
 
@@ -399,6 +510,19 @@ ALTER SEQUENCE public.data_blob_edges_blob_edge_id_seq OWNED BY public.data_blob
 
 
 --
+-- Name: data_blob_file_embeddings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.data_blob_file_embeddings (
+    blob_id bigint NOT NULL,
+    file_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    embedding_with_file public.vector(1024) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: data_blobs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -409,14 +533,10 @@ CREATE TABLE public.data_blobs (
     file_blob_index integer NOT NULL,
     file_start integer NOT NULL,
     file_end integer NOT NULL,
-    is_final_blob boolean NOT NULL,
-    next_blob_id bigint,
     embedding_blob public.vector(1024) NOT NULL,
-    embedding_with_file public.vector(1024) NOT NULL,
     abstract jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT data_blobs_check CHECK ((file_end > file_start)),
-    CONSTRAINT data_blobs_check1 CHECK (((next_blob_id IS NULL) = is_final_blob)),
     CONSTRAINT data_blobs_file_blob_index_check CHECK ((file_blob_index >= 0)),
     CONSTRAINT data_blobs_file_start_check CHECK ((file_start >= 0))
 );
@@ -439,6 +559,26 @@ CREATE SEQUENCE public.data_blobs_blob_id_seq
 --
 
 ALTER SEQUENCE public.data_blobs_blob_id_seq OWNED BY public.data_blobs.blob_id;
+
+
+--
+-- Name: data_file_manifests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.data_file_manifests (
+    file_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    expected_blob_count integer NOT NULL,
+    page_count integer,
+    char_count integer,
+    byte_size bigint,
+    content_hash text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT data_file_manifests_byte_size_check CHECK (((byte_size IS NULL) OR (byte_size >= 0))),
+    CONSTRAINT data_file_manifests_char_count_check CHECK (((char_count IS NULL) OR (char_count >= 0))),
+    CONSTRAINT data_file_manifests_expected_blob_count_check CHECK ((expected_blob_count >= 1)),
+    CONSTRAINT data_file_manifests_page_count_check CHECK (((page_count IS NULL) OR (page_count >= 0)))
+);
 
 
 --
@@ -930,6 +1070,14 @@ ALTER TABLE ONLY public.data_blob_edges
 
 
 --
+-- Name: data_blob_file_embeddings data_blob_file_embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_file_embeddings
+    ADD CONSTRAINT data_blob_file_embeddings_pkey PRIMARY KEY (blob_id);
+
+
+--
 -- Name: data_blobs data_blobs_file_id_file_blob_index_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -943,6 +1091,14 @@ ALTER TABLE ONLY public.data_blobs
 
 ALTER TABLE ONLY public.data_blobs
     ADD CONSTRAINT data_blobs_pkey PRIMARY KEY (blob_id);
+
+
+--
+-- Name: data_file_manifests data_file_manifests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_file_manifests
+    ADD CONSTRAINT data_file_manifests_pkey PRIMARY KEY (file_id);
 
 
 --
@@ -1098,13 +1254,6 @@ ALTER TABLE ONLY public.users
 
 
 --
--- Name: data_blobs_one_final_per_file; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX data_blobs_one_final_per_file ON public.data_blobs USING btree (file_id) WHERE is_final_blob;
-
-
---
 -- Name: idx_auth_google_email; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1133,10 +1282,31 @@ CREATE INDEX idx_data_blob_edges_user_parent ON public.data_blob_edges USING btr
 
 
 --
+-- Name: idx_data_blob_file_embeddings_file; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_blob_file_embeddings_file ON public.data_blob_file_embeddings USING btree (file_id);
+
+
+--
+-- Name: idx_data_blob_file_embeddings_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_blob_file_embeddings_user ON public.data_blob_file_embeddings USING btree (user_id);
+
+
+--
 -- Name: idx_data_blobs_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_data_blobs_user_id ON public.data_blobs USING btree (user_id);
+
+
+--
+-- Name: idx_data_file_manifests_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_data_file_manifests_user ON public.data_file_manifests USING btree (user_id);
 
 
 --
@@ -1287,10 +1457,38 @@ CREATE TRIGGER data_blob_edges_prevent_any_update BEFORE UPDATE ON public.data_b
 
 
 --
--- Name: data_blobs data_blobs_delete_owning_file; Type: TRIGGER; Schema: public; Owner: -
+-- Name: data_blob_file_embeddings data_blob_file_embeddings_check_all_or_none; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER data_blobs_delete_owning_file AFTER DELETE ON public.data_blobs FOR EACH ROW EXECUTE FUNCTION public.data_blobs_delete_owning_file();
+CREATE CONSTRAINT TRIGGER data_blob_file_embeddings_check_all_or_none AFTER INSERT OR DELETE ON public.data_blob_file_embeddings DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.data_blob_file_embeddings_check_all_or_none();
+
+
+--
+-- Name: data_blob_file_embeddings data_blob_file_embeddings_check_consistency; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_blob_file_embeddings_check_consistency BEFORE INSERT ON public.data_blob_file_embeddings FOR EACH ROW EXECUTE FUNCTION public.data_blob_file_embeddings_check_consistency();
+
+
+--
+-- Name: data_blob_file_embeddings data_blob_file_embeddings_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_blob_file_embeddings_prevent_any_update BEFORE UPDATE ON public.data_blob_file_embeddings FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_blobs data_blobs_check_against_manifest; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_blobs_check_against_manifest BEFORE INSERT ON public.data_blobs FOR EACH ROW EXECUTE FUNCTION public.data_blobs_check_against_manifest();
+
+
+--
+-- Name: data_blobs data_blobs_check_contiguous; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE CONSTRAINT TRIGGER data_blobs_check_contiguous AFTER INSERT OR DELETE ON public.data_blobs DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.data_blobs_check_contiguous();
 
 
 --
@@ -1298,6 +1496,20 @@ CREATE TRIGGER data_blobs_delete_owning_file AFTER DELETE ON public.data_blobs F
 --
 
 CREATE TRIGGER data_blobs_prevent_any_update BEFORE UPDATE ON public.data_blobs FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
+
+
+--
+-- Name: data_file_manifests data_file_manifests_check_user_id; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_file_manifests_check_user_id BEFORE INSERT ON public.data_file_manifests FOR EACH ROW EXECUTE FUNCTION public.data_file_manifests_check_user_id();
+
+
+--
+-- Name: data_file_manifests data_file_manifests_prevent_any_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER data_file_manifests_prevent_any_update BEFORE UPDATE ON public.data_file_manifests FOR EACH ROW EXECUTE FUNCTION public.prevent_any_update();
 
 
 --
@@ -1530,19 +1742,35 @@ ALTER TABLE ONLY public.data_blob_edges
 
 
 --
+-- Name: data_blob_file_embeddings data_blob_file_embeddings_blob_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_file_embeddings
+    ADD CONSTRAINT data_blob_file_embeddings_blob_id_fkey FOREIGN KEY (blob_id) REFERENCES public.data_blobs(blob_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_blob_file_embeddings data_blob_file_embeddings_file_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_file_embeddings
+    ADD CONSTRAINT data_blob_file_embeddings_file_id_fkey FOREIGN KEY (file_id) REFERENCES public.data_file_manifests(file_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_blob_file_embeddings data_blob_file_embeddings_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_blob_file_embeddings
+    ADD CONSTRAINT data_blob_file_embeddings_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: data_blobs data_blobs_file_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.data_blobs
-    ADD CONSTRAINT data_blobs_file_id_fkey FOREIGN KEY (file_id) REFERENCES public.data_files(file_id) ON DELETE CASCADE;
-
-
---
--- Name: data_blobs data_blobs_next_blob_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.data_blobs
-    ADD CONSTRAINT data_blobs_next_blob_id_fkey FOREIGN KEY (next_blob_id) REFERENCES public.data_blobs(blob_id) DEFERRABLE INITIALLY DEFERRED;
+    ADD CONSTRAINT data_blobs_file_id_fkey FOREIGN KEY (file_id) REFERENCES public.data_file_manifests(file_id) ON DELETE CASCADE;
 
 
 --
@@ -1551,6 +1779,22 @@ ALTER TABLE ONLY public.data_blobs
 
 ALTER TABLE ONLY public.data_blobs
     ADD CONSTRAINT data_blobs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_file_manifests data_file_manifests_file_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_file_manifests
+    ADD CONSTRAINT data_file_manifests_file_id_fkey FOREIGN KEY (file_id) REFERENCES public.data_files(file_id) ON DELETE CASCADE;
+
+
+--
+-- Name: data_file_manifests data_file_manifests_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.data_file_manifests
+    ADD CONSTRAINT data_file_manifests_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --
@@ -1728,4 +1972,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('202605260001'),
     ('202605290001'),
     ('202606020001'),
-    ('202606030001');
+    ('202606030001'),
+    ('202606040001');

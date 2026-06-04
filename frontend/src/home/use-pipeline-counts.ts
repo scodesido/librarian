@@ -3,7 +3,9 @@ import { useEffect, useState } from "react";
 export interface PipelineCounts {
   files_total: number;
   files_ready: number;
+  blobs_expected: number;
   blobs_total: number;
+  blobs_file_embedded: number;
   blobs_in_tree: number;
   nodes_total: number;
   nodes_weighted: number;
